@@ -1200,9 +1200,7 @@ const openSessionStore = authInstalled
   ? async (rawConfig: unknown) => {
       const config = rawConfig as AppConfig;
       const auth = (await import(AUTH_SPECIFIER)) as {
-        PgSessionStore: new (
-          connection: DatabaseConnection,
-        ) => {
+        PgSessionStore: new (connection: DatabaseConnection) => {
           countExpired(now?: Date): Promise<number>;
           prune(now?: Date): Promise<number>;
         };
