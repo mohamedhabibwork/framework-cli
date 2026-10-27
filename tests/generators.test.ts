@@ -103,7 +103,7 @@ const GENERATIONS: readonly (readonly string[])[] = [
   ['make:job', 'send-report'],
   ['make:schedule', 'nightly-report', '--job', 'send-report', '--cron', '0 3 * * *'],
   ['make:mail', 'welcome'],
-  ['make:notification', 'invoice-paid', '--channels', 'email,database,push'],
+  ['make:notification', 'invoice-paid', '--channels', 'email,database,push,messaging'],
   ['make:command', 'prune-carts'],
   ['make:guard', 'partner-key'],
   ['make:user-provider', 'ldap'],

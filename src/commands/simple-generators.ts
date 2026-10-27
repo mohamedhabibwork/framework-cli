@@ -46,7 +46,9 @@ export const ${jobVar} = defineJob({
           path: 'app/jobs/index.ts',
           transform: (source: string) =>
             addImport(
-              source.replace('export const jobs: JobList = [];', `export const jobs: JobList = [${jobVar}];`),
+              source.includes('// @framework:jobs')
+                ? insertAfterMarker(source, '@framework:jobs', `  ${jobVar},`, 'app/jobs/index.ts')
+                : source.replace('export const jobs: JobList = [];', `export const jobs: JobList = [${jobVar}];`),
               `import { ${jobVar} } from './${name.kebab}.job';`,
             ),
         },

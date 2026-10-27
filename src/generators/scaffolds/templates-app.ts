@@ -73,7 +73,7 @@ const CHANNEL_BUILDERS: Readonly<Record<string, string>> = {
   email: `  toEmail: (payload) => ({ subject: '__TITLE__', text: payload.message }),`,
   database: `  toDatabase: (payload) => ({ title: '__TITLE__', body: payload.message }),`,
   push: `  toPush: (payload) => ({ title: '__TITLE__', body: payload.message }),`,
-  messaging: `  toMessaging: (payload) => ({ text: payload.message }),`,
+  messaging: `  toMessaging: (payload) => ({ title: '__TITLE__', body: payload.message }),`,
 };
 
 export const NOTIFICATION_CHANNELS: readonly string[] = Object.keys(CHANNEL_BUILDERS);

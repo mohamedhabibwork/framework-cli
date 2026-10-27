@@ -75,10 +75,13 @@ export function appTemplateFiles(input: AppTemplateInput): readonly NewFile[] {
     { path: 'app/providers/database.provider.ts', content: databaseProvider() },
     { path: 'app/providers/events.provider.ts', content: eventsProvider() },
     { path: 'app/providers/logging.provider.ts', content: loggingProvider() },
+    { path: 'app/providers/mail.provider.ts', content: mailProvider() },
+    { path: 'app/providers/notifications.provider.ts', content: notificationsProvider() },
     { path: 'app/providers/storage.provider.ts', content: storageProvider() },
     { path: 'app/providers/data.tokens.ts', content: dataTokens() },
     { path: 'app/providers/data.provider.ts', content: dataProvider() },
     { path: 'app/jobs/index.ts', content: jobsRegistry() },
+    { path: 'app/notifications/index.ts', content: notificationsRegistry() },
     { path: 'app/listeners/index.ts', content: listenersRegistry() },
     { path: 'app/listeners/listeners.provider.ts', content: listenersProvider() },
     { path: 'routes/api.ts', content: apiRoutes() },
@@ -123,6 +126,8 @@ function packageJson({ name }: AppTemplateInput): string {
     "@framework/events": "workspace:*",
     "@framework/http": "workspace:*",
     "@framework/logging": "workspace:*",
+    "@framework/mail": "workspace:*",
+    "@framework/notifications": "workspace:*",
     "@framework/openapi": "workspace:*",
     "@framework/queue": "workspace:*",
     "@framework/storage": "workspace:*",
@@ -242,6 +247,10 @@ LOG_NAME=${name}
 STORAGE_DEFAULT=local
 STORAGE_ROOT=storage
 STORAGE_VISIBILITY=private
+
+# Outbound mail (console transport by default; memory for tests).
+MAIL_DRIVER=console
+MAIL_FROM=no-reply@${name}.local
 `;
 }
 
@@ -408,6 +417,30 @@ export const configSchema = z.object({
       }),
     }),
   }),
+  mail: z.object({
+    driver: z.enum(['console', 'memory']).default('console'),
+    from: z.string().trim().toLowerCase().email().default('no-reply@${name}.local'),
+  }),
+  notifications: z.object({
+    providers: z
+      .object({
+        push: z
+          .object({
+            type: z.string().trim().min(1),
+            target: z.string().trim().min(1).optional(),
+            options: z.record(z.string(), z.unknown()).optional(),
+          })
+          .optional(),
+        messaging: z
+          .object({
+            type: z.string().trim().min(1),
+            target: z.string().trim().min(1).optional(),
+            options: z.record(z.string(), z.unknown()).optional(),
+          })
+          .optional(),
+      })
+      .optional(),
+  }),
   // @framework:config-schema-sections
 });
 
@@ -452,6 +485,16 @@ export const mapEnvironment = (env: Readonly<Record<string, string>>): z.input<t
     default: env.STORAGE_DEFAULT,
     disks: {
       local: { driver: 'local' as const, root: env.STORAGE_ROOT, visibility: env.STORAGE_VISIBILITY as never },
+    },
+  },
+  mail: {
+    driver: env.MAIL_DRIVER as never,
+    from: env.MAIL_FROM,
+  },
+  notifications: {
+    providers: {
+      ...(env.NOTIFICATIONS_PUSH_TYPE ? { push: { type: env.NOTIFICATIONS_PUSH_TYPE } } : {}),
+      ...(env.NOTIFICATIONS_MESSAGING_TYPE ? { messaging: { type: env.NOTIFICATIONS_MESSAGING_TYPE } } : {}),
     },
   },
   // @framework:config-env-sections
@@ -598,6 +641,8 @@ import { dataProvider } from '../app/providers/data.provider';
 import { databaseProvider } from '../app/providers/database.provider';
 import { eventsProvider } from '../app/providers/events.provider';
 import { loggingProvider } from '../app/providers/logging.provider';
+import { mailProvider } from '../app/providers/mail.provider';
+import { notificationsProvider } from '../app/providers/notifications.provider';
 import { storageProvider } from '../app/providers/storage.provider';
 import type { AppConfig } from '../config';
 
@@ -615,6 +660,8 @@ export const providers: readonly ServiceProvider<AppConfig>[] = [
   eventsProvider,
   listenersProvider,
   dataProvider,
+  mailProvider,
+  notificationsProvider,
   // @framework:providers
 ];
 `;
@@ -704,6 +751,75 @@ import type { AppConfig } from '../../config';
  * drivers as new entries with their kit \`options\`.
  */
 export const storageProvider = createStorageProvider<AppConfig>();
+`;
+}
+
+function mailProvider(): string {
+  return `import { createMailProvider } from '@framework/mail';
+import type { AppConfig } from '../../config';
+
+/**
+ * Outbound mail (\`MAILER\` and \`MAIL_TRANSPORT\`) from the \`mail\` section:
+ * console transport by default, \`memory\` for test suites.
+ */
+export const mailProvider = createMailProvider<AppConfig>();
+`;
+}
+
+function notificationsProvider(): string {
+  return `import { defineProvider } from '@framework/core';
+import { MAILER } from '@framework/mail';
+import {
+  InMemoryNotificationStore,
+  NOTIFICATION_STORE,
+  NOTIFICATIONS,
+  NotificationsService,
+} from '@framework/notifications';
+import { QUEUE } from '@framework/queue';
+import type { AppConfig } from '../../config';
+import { notificationDeliveryJob } from '../jobs';
+import { notifications } from '../notifications';
+
+/**
+ * Notifications service (\`NOTIFICATIONS\`) backed by \`MAILER\`, \`QUEUE\`,
+ * \`NOTIFICATION_STORE\` (seeded with \`InMemoryNotificationStore\` by default),
+ * and any notifykit \`push\`/\`messaging\` providers declared in
+ * \`config.notifications.providers\`.
+ */
+export const notificationsProvider = defineProvider<AppConfig>({
+  name: 'notifications',
+  dependsOn: ['mail', 'data'],
+  register({ container, config }) {
+    if (!container.has(NOTIFICATION_STORE)) {
+      container.singleton(NOTIFICATION_STORE, () => new InMemoryNotificationStore());
+    }
+    container.singleton(
+      NOTIFICATIONS,
+      (r) =>
+        new NotificationsService({
+          mailer: r.resolve(MAILER),
+          queue: r.resolve(QUEUE),
+          store: r.resolve(NOTIFICATION_STORE),
+          definitions: notifications,
+          job: notificationDeliveryJob,
+          ...(config.notifications.providers ? { providers: config.notifications.providers } : {}),
+        }),
+    );
+  },
+});
+`;
+}
+
+function notificationsRegistry(): string {
+  return `import type { AnyNotificationDefinition } from '@framework/notifications';
+
+/**
+ * Application notifications registered with \`NotificationsService\`.
+ * Generate new notifications with \`make:notification\` and add them below.
+ */
+export const notifications: readonly AnyNotificationDefinition[] = [
+  // @framework:notifications
+];
 `;
 }
 
@@ -803,14 +919,21 @@ export const eventsProvider = defineProvider<AppConfig>({
 }
 
 function jobsRegistry(): string {
-  return `import type { JobList } from '@framework/queue';
+  return `import { defineNotificationJob } from '@framework/notifications';
+import type { JobList } from '@framework/queue';
+
+/** Built-in queued notification delivery job (\`@framework/notifications\`). */
+export const notificationDeliveryJob = defineNotificationJob();
 
 /**
  * The application's job handlers, run by \`bun run worker\`
  * (or \`bun run cli -- queue:work\`). Each job declares a versioned, validated
  * payload and an idempotent handler; add jobs with \`defineJob\`.
  */
-export const jobs: JobList = [];
+export const jobs: JobList = [
+  notificationDeliveryJob,
+  // @framework:jobs
+];
 `;
 }
 

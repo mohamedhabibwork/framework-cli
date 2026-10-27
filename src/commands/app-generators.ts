@@ -120,12 +120,36 @@ export const appGeneratorCommands = [
         throw usageError(`--channels must be distinct values from: ${NOTIFICATION_CHANNELS.join(', ')}`);
       }
       await requireDependency(context, '@framework/notifications');
-      return generate(context, options, [
-        {
-          path: join('app/notifications', `${name.kebab}.notification.ts`),
-          content: renderNotification(name, channels),
-        },
-      ]);
+      const notificationVar = camelVar(name.kebab, 'Notification');
+      const hasRegistry = await Bun.file(resolveInsideProject(context.root, 'app/notifications/index.ts')).exists();
+      const updates = hasRegistry
+        ? [
+            {
+              path: 'app/notifications/index.ts',
+              transform: (source: string) =>
+                addImport(
+                  insertAfterMarker(
+                    source,
+                    '@framework:notifications',
+                    `  ${notificationVar},`,
+                    'app/notifications/index.ts',
+                  ),
+                  `import { ${notificationVar} } from './${name.kebab}.notification';`,
+                ),
+            },
+          ]
+        : [];
+      return generate(
+        context,
+        options,
+        [
+          {
+            path: join('app/notifications', `${name.kebab}.notification.ts`),
+            content: renderNotification(name, channels),
+          },
+        ],
+        updates,
+      );
     },
   }),
   defineCommand({

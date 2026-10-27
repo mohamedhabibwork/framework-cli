@@ -190,7 +190,13 @@ describe('create (app startup generator)', () => {
       // (a) The three kit-backed providers are registered in the providers
       // file (this is also the CLI's textual capability gate).
       const providersSource = await Bun.file(join(app, 'bootstrap/providers.ts')).text();
-      for (const provider of ['cacheProvider', 'loggingProvider', 'storageProvider']) {
+      for (const provider of [
+        'cacheProvider',
+        'loggingProvider',
+        'storageProvider',
+        'mailProvider',
+        'notificationsProvider',
+      ]) {
         expect(providersSource).toContain(provider);
       }
 

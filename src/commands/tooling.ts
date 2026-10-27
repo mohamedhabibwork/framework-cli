@@ -10,10 +10,22 @@ const TOOL_TIMEOUT_MS = 10 * 60_000;
 const OPTIONAL_PEER_SDKS = [
   '@aws-sdk/*',
   '@azure/storage-blob',
+  '@fastify/multipart',
   '@google-cloud/storage',
+  '@parse/node-apn',
+  'amqplib',
+  'firebase-admin',
+  'firebase-admin/*',
+  'formidable',
+  'kafkajs',
   'minio',
+  'multer',
+  'nats',
+  'nodemailer',
   'oci-common',
   'oci-objectstorage',
+  'redis',
+  'web-push',
 ] as const;
 
 async function delegate(context: CommandContext, command: readonly string[], code: string) {
