@@ -125,7 +125,7 @@ function packageJson({ name }: AppTemplateInput): string {
     "@framework/validation": "workspace:*",
     "drizzle-orm": "0.45.4",
     "hono": "4.13.13",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@framework/testing": "workspace:*",
