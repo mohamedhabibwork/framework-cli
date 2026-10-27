@@ -13,7 +13,7 @@ function validExpression(field: FieldDefinition): string {
       return 'sequence';
     case 'numeric': {
       const scale = field.scale ?? DEFAULT_NUMERIC.scale;
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: emits a template literal into generated source
+      // oxlint-disable-next-line eslint/no-template-curly-in-string -- emits a template literal into generated source
       return scale > 0 ? `\`\${sequence}.${'5'.repeat(scale)}\`` : '`${sequence}`';
     }
     case 'boolean':
@@ -112,7 +112,7 @@ export function renderApiTest(def: ResourceDefinition, files: CrudFiles): string
   const factory = `${camel}Factory`;
   const from = (to: string) => importPath(files.test, to);
   const immutable = def.timestamps.createdAt
-    ? // biome-ignore lint/suspicious/noTemplateCurlyInString: emits a template literal into generated source
+    ? // oxlint-disable-next-line eslint/no-template-curly-in-string -- emits a template literal into generated source
       "\n    expect((await call(`${BASE}/${record.id}`, 'PATCH', { createdAt: '2000-01-01T00:00:00Z' })).status).toBe(422);"
     : '';
   const softDeleteLifecycle = def.softDelete

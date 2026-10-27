@@ -80,7 +80,7 @@ export const toolingCommands = [
     description: 'Run configured lint tools; --fix applies safe fixes explicitly',
     options: [{ name: 'fix', type: 'boolean', description: 'Apply safe fixes' }],
     run: ({ options }, context) =>
-      delegate(context, [...context.project.tools.lint, ...(flag(options, 'fix') ? ['--write'] : [])], 'LINT'),
+      delegate(context, [...context.project.tools.lint, ...(flag(options, 'fix') ? ['--fix'] : [])], 'LINT'),
   }),
   defineCommand({
     name: 'format',
@@ -89,7 +89,7 @@ export const toolingCommands = [
     description: 'Format sources; --check performs no writes',
     options: [{ name: 'check', type: 'boolean', description: 'Report only' }],
     run: ({ options }, context) =>
-      delegate(context, [...context.project.tools.format, ...(flag(options, 'check') ? [] : ['--write'])], 'FORMAT'),
+      delegate(context, [...context.project.tools.format, ...(flag(options, 'check') ? ['--check'] : [])], 'FORMAT'),
   }),
   defineCommand({
     name: 'build',

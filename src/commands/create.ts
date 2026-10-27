@@ -58,6 +58,8 @@ export function toStandalonePackageJson(source: string): string {
   };
   const devDeps: Record<string, string> = {
     '@types/bun': '1.4.2',
+    oxfmt: '0.75.0',
+    oxlint: '1.90.0',
     ...(pkg.devDependencies ?? {}),
   };
   pkg.devDependencies = Object.fromEntries(Object.entries(devDeps).sort(([a], [b]) => a.localeCompare(b)));

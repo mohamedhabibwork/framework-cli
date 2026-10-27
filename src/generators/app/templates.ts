@@ -59,7 +59,8 @@ export function appTemplateFiles(input: AppTemplateInput): readonly NewFile[] {
   return [
     { path: 'package.json', content: packageJson(input) },
     { path: 'tsconfig.json', content: `${TSCONFIG_COMPILER_OPTIONS}\n` },
-    { path: 'biome.json', content: biomeJson() },
+    { path: '.oxlintrc.json', content: oxlintJson() },
+    { path: '.oxfmtrc.json', content: oxfmtJson() },
     { path: '.env.example', content: envExample(input) },
     { path: '.gitignore', content: gitignore() },
     { path: 'README.md', content: readme(input) },
@@ -106,6 +107,10 @@ function packageJson({ name }: AppTemplateInput): string {
     "cli": "bun run bin/cli.ts",
     "worker": "bun run bin/worker.ts",
     "db:generate": "drizzle-kit generate",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "typecheck": "tsc -p tsconfig.json",
     "test": "bun test"
   },
@@ -136,27 +141,60 @@ function packageJson({ name }: AppTemplateInput): string {
 `;
 }
 
-function biomeJson(): string {
-  // `"root": false` lets the config compose when the app is generated *inside*
-  // the framework workspace (apps/*) instead of replacing the root config —
-  // without it, `biome check .` at the workspace root fails with a nested-root
-  // configuration error. It is a no-op for a standalone app (no parent config).
+function oxlintJson(): string {
   return `{
-  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
-  "root": false,
-  "vcs": { "enabled": false },
-  "files": { "includes": ["**", "!**/node_modules", "!**/dist", "!**/database/migrations/meta"] },
-  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
-  "javascript": { "formatter": { "quoteStyle": "single", "trailingCommas": "all", "semicolons": "always" } },
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "preset": "recommended",
-      "suspicious": { "noExplicitAny": "error", "noConsole": { "level": "warn", "options": { "allow": ["error"] } } },
-      "style": { "noNonNullAssertion": "error", "useImportType": "error" }
-    }
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
   },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } }
+  "plugins": ["typescript", "unicorn", "import", "promise"],
+  "rules": {
+    "eslint/no-unused-vars": [
+      "error",
+      { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }
+    ],
+    "eslint/no-console": ["warn", { "allow": ["warn", "error"] }],
+    "eslint/no-await-in-loop": "off",
+    "eslint/no-shadow": "off",
+    "eslint/no-unused-expressions": "off",
+    "eslint/no-new": "off",
+    "eslint/no-useless-constructor": "off",
+    "eslint/no-underscore-dangle": "off",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-this-alias": "off",
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/no-array-sort": "off",
+    "unicorn/no-array-reverse": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/no-useless-spread": "off",
+    "unicorn/no-useless-fallback-in-spread": "off",
+    "import/no-duplicates": "off"
+  },
+  "overrides": [
+    {
+      "files": ["tests/**/*.ts", "**/tests/**/*.ts"],
+      "rules": {
+        "eslint/no-console": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["dist", "coverage", "node_modules", "**/database/migrations/meta"]
+}
+`;
+}
+
+function oxfmtJson(): string {
+  return `{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 120,
+  "tabWidth": 2,
+  "useTabs": false,
+  "singleQuote": true,
+  "semi": true,
+  "trailingComma": "all",
+  "ignorePatterns": ["dist", "coverage", "node_modules", "**/database/migrations/meta"]
 }
 `;
 }
@@ -1086,8 +1124,8 @@ export const project = defineProject({
   tools: {
     typecheck: ['bunx', 'tsc', '-p', 'tsconfig.json'],
     test: ['bun', 'test'],
-    lint: ['bunx', 'biome', 'check', '.'],
-    format: ['bunx', 'biome', 'format', '.'],
+    lint: ['bunx', 'oxlint', '.'],
+    format: ['bunx', 'oxfmt', '.'],
     drizzleKit: ['bunx', 'drizzle-kit'],
     dev: ['bun', 'run', '--hot', 'bin/server.ts'],
     serve: ['bun', 'run', 'bin/server.ts'],
