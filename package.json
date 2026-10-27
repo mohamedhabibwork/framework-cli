@@ -1,0 +1,49 @@
+{
+  "name": "@framework/cli",
+  "version": "0.2.0",
+  "description": "CLI runtime, command registry, and application/module/auth code generators.",
+  "license": "MIT",
+  "type": "module",
+  "homepage": "https://github.com/mohamedhabibwork/framework/tree/main/packages/cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mohamedhabibwork/framework-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mohamedhabibwork/framework/issues"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@framework/core": "github:mohamedhabibwork/framework-core#standalone",
+    "@framework/database": "github:mohamedhabibwork/framework-database#standalone",
+    "@framework/http": "github:mohamedhabibwork/framework-http#standalone",
+    "@framework/openapi": "github:mohamedhabibwork/framework-openapi#standalone",
+    "@framework/prompts": "github:mohamedhabibwork/framework-prompts#standalone",
+    "@framework/queue": "github:mohamedhabibwork/framework-queue#standalone",
+    "@framework/scheduler": "github:mohamedhabibwork/framework-scheduler#standalone",
+    "@framework/search": "github:mohamedhabibwork/framework-search#standalone",
+    "@framework/workflow": "github:mohamedhabibwork/framework-workflow#standalone",
+    "drizzle-orm": "0.45.4",
+    "postgres": "3.4.9",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@framework/testing": "github:mohamedhabibwork/framework-testing#standalone",
+    "@types/bun": "1.4.2",
+    "oxfmt": "0.75.0",
+    "oxlint": "1.90.0",
+    "typescript": "7.0.2"
+  }
+}
