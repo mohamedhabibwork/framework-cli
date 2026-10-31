@@ -14,7 +14,6 @@ const PLANNED: readonly [string, CommandGroup, string][] = [
   // new forward migration, or reset a non-production target with `db:fresh`.
   ['db:rollback', 'database', 'Reverse the last migration (see db:fresh; forward-only by design)'],
   ['cache:prune', 'cache', 'Adapter-supported expiry cleanup'],
-  ['storage:link', 'storage', 'Link a configured local public disk'],
   ['storage:prune', 'storage', 'Remove framework-owned temporary uploads'],
   // First-party package equivalents (E-series). Listed as planned so the
   // catalog is honest until the subsystem tasks land (E05/E09/E11/E12).

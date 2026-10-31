@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GLOBAL_OPTIONS, parseArgs, splitCommand } from '../src/args';
@@ -548,6 +548,60 @@ describe('infrastructure command execution (in process)', () => {
     expect(bad.code).toBe(EXIT.FAILURE);
     expect(bad.envelope.error?.code).toBe('STORAGE_CHECK_FAILED');
     expect(bad.envelope.error?.message).toMatch(/unknown disk "missing"/);
+  });
+
+  test('storage:link links the public local disk root under public/storage and is idempotent', async () => {
+    await Bun.write(join(root, 'providers.ts'), WITH_STORAGE);
+    const config = {
+      storage: {
+        default: 'local',
+        disks: {
+          local: { driver: 'local', root: 'storage/local', visibility: 'private' },
+          pub: { driver: 'local', root: 'storage/public', visibility: 'public', publicBaseUrl: '/storage' },
+        },
+      },
+    };
+    const project = infrastructureProject({ loadConfig: async () => config });
+
+    const first = await runInfra(['--json', 'storage:link'], project);
+    expect(first.code).toBe(0);
+    expect(first.envelope).toMatchObject({ status: 'ok', data: { disk: 'pub', created: true } });
+    const linkPath = join(root, 'public', 'storage');
+    expect(await readlink(linkPath)).toBe(join(root, 'storage', 'public'));
+
+    const second = await runInfra(['--json', 'storage:link'], project);
+    expect(second.code).toBe(0);
+    expect(second.envelope).toMatchObject({ status: 'ok', data: { disk: 'pub', created: false } });
+  });
+
+  test('storage:link refuses to replace a real directory and fails without a public local disk', async () => {
+    await Bun.write(join(root, 'providers.ts'), WITH_STORAGE);
+    const privateOnly = {
+      storage: {
+        default: 'local',
+        disks: { local: { driver: 'local', root: 'storage/local', visibility: 'private' } },
+      },
+    };
+    const none = await runInfra(
+      ['--json', 'storage:link'],
+      infrastructureProject({ loadConfig: async () => privateOnly }),
+    );
+    expect(none.code).toBe(EXIT.FAILURE);
+    expect(none.envelope.error?.code).toBe('STORAGE_LINK_NO_DISK');
+
+    const config = {
+      storage: {
+        default: 'pub',
+        disks: { pub: { driver: 'local', root: 'storage/other', visibility: 'public', publicBaseUrl: '/other' } },
+      },
+    };
+    await mkdir(join(root, 'public-real'), { recursive: true });
+    const blocked = await runInfra(
+      ['--json', 'storage:link', '--link', 'public-real'],
+      infrastructureProject({ loadConfig: async () => config }),
+    );
+    expect(blocked.code).toBe(EXIT.FAILURE);
+    expect(blocked.envelope.error?.code).toBe('STORAGE_LINK_BLOCKED');
   });
 
   test('storage:check enforces publicBaseUrl on public disks (provider rule)', async () => {

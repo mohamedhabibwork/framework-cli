@@ -1,4 +1,5 @@
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
+import { lstat, mkdir, readlink, symlink, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { flag, stringOption } from '../args';
 import { type CommandContext, defineCommand } from '../command';
@@ -159,6 +160,85 @@ export const infrastructureCommands = [
       }
       context.print(`Disk configuration is valid (${rows.length} disk(s)).`);
       return { data: { default: declaredDefault ?? null, valid: true, disks: rows } };
+    },
+  }),
+  defineCommand({
+    name: 'storage:link',
+    group: 'storage',
+    status: 'implemented',
+    description: 'Link a public local disk root into the web-served directory (default public/storage)',
+    options: [
+      { name: 'disk', type: 'string', placeholder: '<name>', description: 'Public local disk to link' },
+      { name: 'link', type: 'string', placeholder: '<path>', description: 'Link location inside the project' },
+      { name: 'force', type: 'boolean', description: 'Replace an existing symlink that points elsewhere' },
+    ],
+    requires: ['@framework/storage (storageProvider registered)'],
+    async run({ options }, context) {
+      await requireProvider(
+        context,
+        'storage:link',
+        'storageProvider',
+        'storage',
+        'Add @framework/storage and register createStorageProvider(...) in the providers file first.',
+      );
+      const config = await loadConfigOrFail(context);
+      const disks = ((config as { storage?: { disks?: Record<string, unknown> } }).storage?.disks ?? {}) as Record<
+        string,
+        { driver?: unknown; root?: unknown; visibility?: unknown }
+      >;
+      const wanted = stringOption(options, 'disk');
+      const candidates = Object.entries(disks).filter(
+        ([name, disk]) =>
+          disk?.driver === 'local' &&
+          disk.visibility === 'public' &&
+          typeof disk.root === 'string' &&
+          (wanted === undefined || wanted === name),
+      );
+      if (candidates.length === 0) {
+        throw failure(
+          'STORAGE_LINK_NO_DISK',
+          wanted ? `"${wanted}" is not a public local disk` : 'No public local disk is configured',
+          'Declare a disk with driver "local", visibility "public" and a publicBaseUrl in storage.disks.',
+        );
+      }
+      if (candidates.length > 1) {
+        throw usageError(
+          `Several public local disks are configured (${candidates.map(([name]) => name).join(', ')})`,
+          'Pick one with --disk <name>.',
+        );
+      }
+      const [diskName, disk] = candidates[0] as [string, { root?: unknown }];
+      const root = disk.root as string;
+      const target = isAbsolute(root) ? root : resolve(context.root, root);
+      const linkPath = resolveInsideProject(context.root, stringOption(options, 'link') ?? 'public/storage');
+
+      const existing = await lstat(linkPath).catch(() => null);
+      if (existing) {
+        if (!existing.isSymbolicLink()) {
+          throw failure(
+            'STORAGE_LINK_BLOCKED',
+            `"${linkPath}" already exists and is not a symlink`,
+            'Remove it or choose another location with --link.',
+          );
+        }
+        if ((await readlink(linkPath)) === target) {
+          context.print(`Already linked: ${linkPath} -> ${target}`);
+          return { data: { disk: diskName, link: linkPath, target, created: false } };
+        }
+        if (!flag(options, 'force')) {
+          throw failure(
+            'STORAGE_LINK_BLOCKED',
+            `"${linkPath}" is a symlink to a different target`,
+            'Re-run with --force to replace it.',
+          );
+        }
+        await unlink(linkPath);
+      }
+      await mkdir(target, { recursive: true });
+      await mkdir(dirname(linkPath), { recursive: true });
+      await symlink(target, linkPath, 'dir');
+      context.print(`Linked ${linkPath} -> ${target}`);
+      return { data: { disk: diskName, link: linkPath, target, created: true } };
     },
   }),
   defineCommand({
