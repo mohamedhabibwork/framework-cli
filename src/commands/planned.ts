@@ -8,7 +8,6 @@ import { unsupported } from '../errors';
 const PLANNED: readonly [string, CommandGroup, string][] = [
   ['integration:list', 'project', 'Show configured adapters, versions and capabilities'],
   ['integration:check', 'project', 'Validate adapter compatibility and optional connectivity'],
-  ['make:model', 'generators', 'Thin model metadata/serialization'],
   ['make:integration', 'generators', 'Optional lifecycle adapter'],
   // Migrations are forward-only by decision (ADR): roll back by authoring a
   // new forward migration, or reset a non-production target with `db:fresh`.

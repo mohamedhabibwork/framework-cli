@@ -15,8 +15,18 @@ import { renderDto, renderTable } from '../crud/templates-schema';
 import { type ResourceNames, resourceNames } from '../naming';
 import { assertPrerequisites, type FileUpdate, type NewFile } from '../plan';
 import { insertAfterMarker } from '../registration';
+import { renderModel } from './templates-model';
 
-export type SliceKind = 'controller' | 'dto' | 'policy' | 'request' | 'repository' | 'response' | 'schema' | 'service';
+export type SliceKind =
+  | 'controller'
+  | 'dto'
+  | 'model'
+  | 'policy'
+  | 'request'
+  | 'repository'
+  | 'response'
+  | 'schema'
+  | 'service';
 
 export interface SliceRequest {
   readonly resource: string;
@@ -126,6 +136,9 @@ export async function planSlice(
   const def = await tableSlice(context, names, request);
 
   switch (kind) {
+    case 'model':
+      // Introspects the existing table only; it needs no module siblings.
+      return { files: [{ path: files.model, content: renderModel(def, files) }], updates: [] };
     case 'repository':
       return {
         files: [{ path: files.repository, content: renderRepository(def, files) }],

@@ -193,8 +193,9 @@ describe('CLI process contract', () => {
     expect((await cli(['nope'])).code).toBe(EXIT.USAGE);
     // queue:failed moved from planned to implemented (real Redis); a command
     // that is still planned keeps the exit-3 contract (make:policy is now a
-    // scaffold generator; make:guard is built; make:model remains planned).
-    const planned = await cli(['--json', 'make:model']);
+    // scaffold generator; make:guard and make:model are built; make:integration
+    // remains planned).
+    const planned = await cli(['--json', 'make:integration']);
     expect(planned.code).toBe(EXIT.UNSUPPORTED);
     expect(JSON.parse(planned.stdout)).toMatchObject({ status: 'error', error: { code: 'UNSUPPORTED_CAPABILITY' } });
     // The playground registers the auth module, so authenticated access is a

@@ -10,6 +10,7 @@ export interface CrudFiles {
   readonly updateRequest: string;
   readonly listRequest: string;
   readonly response: string;
+  readonly model: string;
   readonly repository: string;
   readonly service: string;
   readonly controller: string;
@@ -34,6 +35,7 @@ export function crudFiles(def: Pick<ResourceDefinition, 'names'>, paths: Project
     updateRequest: `${dir}/requests/update-${kebab}.request.ts`,
     listRequest: `${dir}/requests/list-${pluralKebab}.request.ts`,
     response: `${dir}/responses/${kebab}.response.ts`,
+    model: `${dir}/models/${kebab}.model.ts`,
     repository: `${dir}/repositories/${kebab}.repository.ts`,
     service: `${dir}/services/${kebab}.service.ts`,
     controller: `${dir}/controllers/${kebab}.controller.ts`,

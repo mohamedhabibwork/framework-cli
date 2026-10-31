@@ -156,6 +156,10 @@ export const scaffoldGeneratorCommands = [
     ],
   ),
   sliceCommand('make:response', 'response', 'Public response projection and serializer', ['make:response Product']),
+  sliceCommand('make:model', 'model', 'Thin model metadata and serialization derived from the Drizzle table', [
+    'make:model Product',
+    'make:model Product --table products --dry-run',
+  ]),
   sliceCommand('make:service', 'service', 'Business service over the repository and DTOs', ['make:service Product']),
   sliceCommand('make:controller', 'controller', 'Typed controller mapping HTTP input to the service', [
     'make:controller Product',
