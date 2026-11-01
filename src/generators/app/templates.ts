@@ -647,10 +647,9 @@ import { storageProvider } from '../app/providers/storage.provider';
 import type { AppConfig } from '../config';
 
 /**
- * Explicit provider registration. Order is resolved from \`dependsOn\`, with
- * one exception: \`cacheProvider\` must stay above the \`@framework:providers\`
- * marker — \`make:auth\` appends the auth provider there, and it publishes the
- * cache's rate limiter during its own registration.
+ * Explicit provider registration. List order does not matter: boot order is
+ * resolved from \`dependsOn\` and the tokens each provider \`provides\` /
+ * \`requires\` / uses (\`optional\`).
  */
 export const providers: readonly ServiceProvider<AppConfig>[] = [
   cacheProvider,
