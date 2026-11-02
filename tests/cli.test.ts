@@ -386,7 +386,11 @@ describe('infrastructure command execution (in process)', () => {
     const providers = join(root, 'providers.ts');
     const cache = (): ProjectAdapter => infrastructureProject({ cache: async () => cacheHandle({}).handle });
 
-    await Bun.write(providers, 'const api = apiPreset<AppConfig>({ notifications });\n');
+    // A comment describing the option must not count as using it.
+    await Bun.write(
+      providers,
+      '// remove a part with `cache: false`\nconst api = apiPreset<AppConfig>({ notifications });\n',
+    );
     expect((await runInfra(['--json', 'cache:clear', '--confirm'], cache())).code).toBe(0);
 
     await Bun.write(providers, 'const api = apiPreset<AppConfig>({ notifications, cache: false });\n');

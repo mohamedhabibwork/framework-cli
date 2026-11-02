@@ -411,7 +411,7 @@ describe('create --with-demo (one-command full generation)', () => {
         expect(paths).toContain(expected);
       }
 
-      // The data module is defined in bootstrap/app.ts, not under app/modules.
+      // The data module comes from apiPreset, not from app/modules.
       const collision = await capture(
         Bun.spawn(
           [

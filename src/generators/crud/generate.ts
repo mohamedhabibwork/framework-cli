@@ -3,7 +3,7 @@ import { unsupported, usageError } from '../../errors';
 import type { ResourceNames } from '../naming';
 import { resourceNames } from '../naming';
 import { importPath, resolveInsideProject } from '../paths';
-import { buildChanges, type FileChange, type FileUpdate, type NewFile } from '../plan';
+import { buildChanges, type FileChange, type FileUpdate, type NewFile, withoutComments } from '../plan';
 import { addImport, insertAfterMarker } from '../registration';
 import {
   type Access,
@@ -257,7 +257,8 @@ function moduleRegistration(app: string, def: ResourceDefinition, files: CrudFil
 
 /**
  * With `defineApp` a mount path lives where its module is defined: a generated
- * module's index, or the app file itself (hand-written modules and `http.route`).
+ * module's index, the app file itself (hand-written modules and `http.route`),
+ * or `apiPreset`, whose modules own `/data` unless the app sets `data: false`.
  */
 async function assertMountFree(context: CommandContext, app: string, def: ResourceDefinition, files: CrudFiles) {
   const segment = def.mount.split('/').at(-1) as string;
@@ -266,6 +267,10 @@ async function assertMountFree(context: CommandContext, app: string, def: Resour
   const indexes = await Array.fromAsync(scan);
   for (const path of [app, ...indexes.filter((index) => index !== files.index)]) {
     const source = await Bun.file(resolveInsideProject(context.root, path)).text();
+    const code = withoutComments(source);
+    if (segment === 'data' && code.includes('...api.modules') && !code.includes('data: false')) {
+      throw usageError(`Route collision: ${def.mount} is already mounted by apiPreset in ${path}`);
+    }
     if (source.includes(`path: '/${segment}'`) || source.includes(`.route('${def.mount}'`)) {
       throw usageError(`Route collision: ${def.mount} is already mounted in ${path}`);
     }

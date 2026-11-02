@@ -5,6 +5,7 @@ import { flag, stringOption } from '../args';
 import { type CommandContext, defineCommand } from '../command';
 import { failure, unsupported, usageError } from '../errors';
 import { resolveInsideProject } from '../generators/paths';
+import { withoutComments } from '../generators/plan';
 import { table } from '../output';
 import { loadConfigOrFail } from './project';
 
@@ -14,7 +15,8 @@ const PRESET_PARTS: Readonly<Record<string, string>> = { cacheProvider: 'cache',
 function isRegistered(source: string, symbol: string): boolean {
   if (source.includes(symbol)) return true;
   const part = PRESET_PARTS[symbol];
-  return part !== undefined && /\bapiPreset[<(]/.test(source) && !new RegExp(`\\b${part}: false`).test(source);
+  const code = withoutComments(source);
+  return part !== undefined && /\bapiPreset[<(]/.test(code) && !new RegExp(`\\b${part}: false`).test(code);
 }
 
 /**

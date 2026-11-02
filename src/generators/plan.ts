@@ -160,3 +160,6 @@ export async function applyChanges(root: string, changes: readonly FileChange[])
   }
   return { rollback };
 }
+
+/** Source text without comments, for capability checks that must not match prose. */
+export const withoutComments = (source: string): string => source.replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, '');
