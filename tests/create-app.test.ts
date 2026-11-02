@@ -117,11 +117,6 @@ describe('create (app startup generator)', () => {
         'package.json',
         'bootstrap/app.ts',
         'bootstrap/middleware.ts',
-        'app/providers/cache.provider.ts',
-        'app/providers/database.provider.ts',
-        'app/providers/events.provider.ts',
-        'app/providers/logging.provider.ts',
-        'app/providers/storage.provider.ts',
         'app/jobs/index.ts',
         'bin/server.ts',
         'bin/worker.ts',
@@ -137,6 +132,8 @@ describe('create (app startup generator)', () => {
       for (const path of [
         'bootstrap/http.ts',
         'bootstrap/providers.ts',
+        'app/providers/cache.provider.ts',
+        'app/providers/data.provider.ts',
         'bootstrap/openapi.ts',
         'routes/api.ts',
         'routes/health.ts',
@@ -197,18 +194,11 @@ describe('create (app startup generator)', () => {
   test(
     'kit-backed subsystems are registered and their commands work',
     async () => {
-      // (a) The three kit-backed providers are registered in the providers
-      // file (this is also the CLI's textual capability gate).
+      // (a) The kit-backed providers come from the preset (the CLI's textual
+      // capability gate reads this too).
       const providersSource = await Bun.file(join(app, 'bootstrap/app.ts')).text();
-      for (const provider of [
-        'cacheProvider',
-        'loggingProvider',
-        'storageProvider',
-        'mailProvider',
-        'notificationsProvider',
-      ]) {
-        expect(providersSource).toContain(provider);
-      }
+      expect(providersSource).toContain('apiPreset<AppConfig>(');
+      expect(providersSource).toContain('...api.providers,');
 
       // (b) storage:check is read-only: it validates the generated disk
       // configuration without creating the root.

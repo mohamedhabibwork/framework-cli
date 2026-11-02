@@ -382,6 +382,17 @@ describe('infrastructure command execution (in process)', () => {
     return { code, envelope: JSON.parse(chunks.join('\n')) as Envelope };
   }
 
+  test('apiPreset satisfies the capability gate unless that part is removed', async () => {
+    const providers = join(root, 'providers.ts');
+    const cache = (): ProjectAdapter => infrastructureProject({ cache: async () => cacheHandle({}).handle });
+
+    await Bun.write(providers, 'const api = apiPreset<AppConfig>({ notifications });\n');
+    expect((await runInfra(['--json', 'cache:clear', '--confirm'], cache())).code).toBe(0);
+
+    await Bun.write(providers, 'const api = apiPreset<AppConfig>({ notifications, cache: false });\n');
+    expect((await runInfra(['--json', 'cache:clear', '--confirm'], cache())).code).toBe(EXIT.UNSUPPORTED);
+  });
+
   function cacheHandle(overrides: Partial<{ clear: () => Promise<number>; driver: string }>) {
     const state = { closed: false, calls: 0 };
     return {

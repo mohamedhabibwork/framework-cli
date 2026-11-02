@@ -68,15 +68,6 @@ export function appTemplateFiles(input: AppTemplateInput): readonly NewFile[] {
     { path: 'config/index.ts', content: config(input) },
     { path: 'bootstrap/app.ts', content: bootstrapApp(input) },
     { path: 'bootstrap/middleware.ts', content: bootstrapMiddleware() },
-    { path: 'app/providers/cache.provider.ts', content: cacheProvider() },
-    { path: 'app/providers/database.provider.ts', content: databaseProvider() },
-    { path: 'app/providers/events.provider.ts', content: eventsProvider() },
-    { path: 'app/providers/logging.provider.ts', content: loggingProvider() },
-    { path: 'app/providers/mail.provider.ts', content: mailProvider() },
-    { path: 'app/providers/notifications.provider.ts', content: notificationsProvider() },
-    { path: 'app/providers/storage.provider.ts', content: storageProvider() },
-    { path: 'app/providers/data.tokens.ts', content: dataTokens() },
-    { path: 'app/providers/data.provider.ts', content: dataProvider() },
     { path: 'app/jobs/index.ts', content: jobsRegistry() },
     { path: 'app/notifications/index.ts', content: notificationsRegistry() },
     { path: 'app/listeners/index.ts', content: listenersRegistry() },
@@ -125,6 +116,7 @@ function packageJson({ name }: AppTemplateInput): string {
     "@framework/notifications": "workspace:*",
     "@framework/openapi": "workspace:*",
     "@framework/queue": "workspace:*",
+    "@framework/presets": "workspace:*",
     "@framework/storage": "workspace:*",
     "@framework/support": "workspace:*",
     "@framework/validation": "workspace:*",
@@ -293,7 +285,7 @@ bun run cli -- make:crud Order --module orders \\\\
 ## Layout
 
 - \`app/modules/<feature>/\` — business modules (generate with \`make:crud\`)
-- \`app/providers/\` — application providers (database, events)
+- \`app/providers/\` — your own providers (\`make:provider\`)
 - \`bootstrap/app.ts\` — the application in one place: providers, modules, health, routes, OpenAPI
 - \`bootstrap/middleware.ts\` — named middleware aliases and groups
 - \`config/\` — validated configuration (environment-mapped)
@@ -310,8 +302,8 @@ clients (subscribe to allowlisted channels such as \`events\`).
 The cache (\`CACHE\`/\`LOCK_STORE\`/\`RATE_LIMITER\` via \`@framework/cache\`),
 structured logging (\`LOGGER\` via \`@framework/logging\`) and storage disks
 (\`STORAGE\` via \`@framework/storage\`) are configured by the \`cache\`,
-\`logging\` and \`storage\` sections of \`config/index.ts\` and registered in
-\`bootstrap/app.ts\`. Three CLI commands operate them:
+\`logging\` and \`storage\` sections of \`config/index.ts\` and installed by
+\`apiPreset\` (\`@framework/presets\`) in \`bootstrap/app.ts\`. Three CLI commands operate them:
 
 \`\`\`sh
 bun run cli -- cache:clear --dry-run    # preview; add --confirm to execute
@@ -454,23 +446,16 @@ export const loadAppConfig = (options?: DefineConfigLoadOptions) => appConfig.lo
 }
 
 function bootstrapApp({ className, apiTitle }: AppTemplateInput): string {
-  return `import { cacheHealthCheck } from '@framework/cache';
-import type { Application } from '@framework/core';
+  return `import type { Application } from '@framework/core';
 import { auditRoutes, dataOperations } from '@framework/crud';
-import { AUDIT_READER, databaseHealthCheck } from '@framework/database';
+import { AUDIT_READER } from '@framework/database';
 import { defineApp, defineModule, type FrameworkEnv, forbidden, resolve } from '@framework/http';
 import { generateOpenApiDocument, type Operation } from '@framework/openapi';
-import { queueHealthCheck } from '@framework/queue';
+import { apiPreset, WEBSOCKET_GATEWAY } from '@framework/presets';
 import type { Context } from 'hono';
+import { notificationDeliveryJob } from '../app/jobs';
 import { listenersProvider } from '../app/listeners/listeners.provider';
-import { cacheProvider } from '../app/providers/cache.provider';
-import { dataProvider } from '../app/providers/data.provider';
-import { databaseProvider } from '../app/providers/database.provider';
-import { eventsProvider, WEBSOCKET_GATEWAY } from '../app/providers/events.provider';
-import { loggingProvider } from '../app/providers/logging.provider';
-import { mailProvider } from '../app/providers/mail.provider';
-import { notificationsProvider } from '../app/providers/notifications.provider';
-import { storageProvider } from '../app/providers/storage.provider';
+import { notifications } from '../app/notifications';
 import type { AppConfig } from '../config';
 import { dataRoutes } from '../routes/data';
 import { createMiddleware } from './middleware';
@@ -483,6 +468,13 @@ const dataModule = defineModule<AppConfig, Operation>({
   routes: { path: '/data', app: dataRoutes },
   operations: dataOperations({ mount: '/api/v1/data' }),
 });
+
+/**
+ * Database, cache, queue, events, logging, storage, mail, notifications and
+ * import/export, configured by \`config/index.ts\`. Replace a part by passing
+ * a provider (\`mail: myMailProvider\`) or remove it (\`data: false\`).
+ */
+const api = apiPreset<AppConfig>({ notifications: { definitions: notifications, job: notificationDeliveryJob } });
 
 /**
  * The application, registered in one place. Generators add providers and
@@ -509,22 +501,15 @@ export const app = defineApp<AppConfig, Operation>({
   }),
   middleware: (config) => createMiddleware(config).resolve(['api']),
   providers: [
-    cacheProvider,
-    loggingProvider,
-    storageProvider,
-    databaseProvider,
-    eventsProvider,
+    ...api.providers,
     listenersProvider,
-    dataProvider,
-    mailProvider,
-    notificationsProvider,
     // @framework:providers
   ],
   modules: [
     dataModule,
     // @framework:modules
   ],
-  health: { checks: [databaseHealthCheck(), cacheHealthCheck(), queueHealthCheck()] },
+  health: api.health,
   routes: (http, { config, container }) => {
     // @framework:app-routes
     http.route(
@@ -598,149 +583,6 @@ export function createMiddleware(config: AppConfig): MiddlewareRegistry {
 `;
 }
 
-function databaseProvider(): string {
-  return `import { defineProvider, EXECUTION_CONTEXT } from '@framework/core';
-import {
-  AUDIT_READER,
-  AuditReader,
-  createConnection,
-  DATA_CONTEXT,
-  DATABASE,
-  TRANSACTION_CONTEXT,
-  TransactionContext,
-} from '@framework/database';
-import type { AppConfig } from '../../config';
-
-/**
- * Pooled PostgreSQL connection (singleton, closed on shutdown) and per-scope
- * data access: a transaction context plus the execution context (actor,
- * correlation id) repositories use for auditing. The audit reader serves the
- * \`/audit\` endpoints.
- */
-export const databaseProvider = defineProvider<AppConfig>({
-  name: 'database',
-  register({ container, config }) {
-    container.singleton(
-      DATABASE,
-      () =>
-        createConnection({
-          url: config.database.url,
-          maxConnections: config.database.maxConnections,
-          applicationName: config.app.name,
-        }),
-      (connection) => connection.close(),
-    );
-    container.scoped(TRANSACTION_CONTEXT, (r) => new TransactionContext(r.resolve(DATABASE).db));
-    container.scoped(DATA_CONTEXT, (r) => ({
-      transactions: r.resolve(TRANSACTION_CONTEXT),
-      execution: r.resolve(EXECUTION_CONTEXT),
-    }));
-    container.scoped(AUDIT_READER, (r) => new AuditReader(r.resolve(TRANSACTION_CONTEXT).executor));
-  },
-});
-`;
-}
-
-function cacheProvider(): string {
-  return `import { createCacheProvider } from '@framework/cache';
-import type { AppConfig } from '../../config';
-
-/**
- * The application cache stack — \`CACHE\`, \`LOCK_STORE\` and \`RATE_LIMITER\`
- * — on one driver (config \`cache.driver\`): in-process memory for
- * single-instance development/tests, redis for state shared across
- * instances. The auth provider publishes this stack's rate limiter for login
- * throttling, which is why it registers after this provider.
- */
-export const cacheProvider = createCacheProvider<AppConfig>((config) => config.cache);
-`;
-}
-
-function loggingProvider(): string {
-  return `import { createLoggingProvider } from '@framework/logging';
-import type { AppConfig } from '../../config';
-
-/**
- * The shared structured logger (\`LOGGER\`) from the \`logging\` section:
- * console sink at info level by default; switch to \`file\` (with
- * \`LOG_FILE_PATH\`) for production. Every entry is redacted and enriched
- * with the ambient execution context (actor, correlation id).
- */
-export const loggingProvider = createLoggingProvider<AppConfig>((config) => config.logging);
-`;
-}
-
-function storageProvider(): string {
-  return `import { createStorageProvider } from '@framework/storage';
-import type { AppConfig } from '../../config';
-
-/**
- * Storage disks from the \`storage\` section: every \`storage.disks\` entry
- * becomes a singleton under \`storageDiskToken(name)\` and the
- * \`storage.default\` disk is bound to \`STORAGE\`. The generated default is
- * one private local disk rooted inside the app (gitignored); add cloud
- * drivers as new entries with their kit \`options\`.
- */
-export const storageProvider = createStorageProvider<AppConfig>();
-`;
-}
-
-function mailProvider(): string {
-  return `import { createMailProvider } from '@framework/mail';
-import type { AppConfig } from '../../config';
-
-/**
- * Outbound mail (\`MAILER\` and \`MAIL_TRANSPORT\`) from the \`mail\` section:
- * console transport by default, \`memory\` for test suites.
- */
-export const mailProvider = createMailProvider<AppConfig>();
-`;
-}
-
-function notificationsProvider(): string {
-  return `import { defineProvider } from '@framework/core';
-import { MAILER } from '@framework/mail';
-import {
-  InMemoryNotificationStore,
-  NOTIFICATION_STORE,
-  NOTIFICATIONS,
-  NotificationsService,
-} from '@framework/notifications';
-import { QUEUE } from '@framework/queue';
-import type { AppConfig } from '../../config';
-import { notificationDeliveryJob } from '../jobs';
-import { notifications } from '../notifications';
-
-/**
- * Notifications service (\`NOTIFICATIONS\`) backed by \`MAILER\`, \`QUEUE\`,
- * \`NOTIFICATION_STORE\` (seeded with \`InMemoryNotificationStore\` by default),
- * and any notifykit \`push\`/\`messaging\` providers declared in
- * \`config.notifications.providers\`.
- */
-export const notificationsProvider = defineProvider<AppConfig>({
-  name: 'notifications',
-  dependsOn: ['mail', 'data'],
-  register({ container, config }) {
-    if (!container.has(NOTIFICATION_STORE)) {
-      container.singleton(NOTIFICATION_STORE, () => new InMemoryNotificationStore());
-    }
-    container.singleton(
-      NOTIFICATIONS,
-      (r) =>
-        new NotificationsService({
-          mailer: r.resolve(MAILER),
-          queue: r.resolve(QUEUE),
-          store: r.resolve(NOTIFICATION_STORE),
-          definitions: notifications,
-          job: notificationDeliveryJob,
-          ...(config.notifications.providers ? { providers: config.notifications.providers } : {}),
-        }),
-    );
-  },
-});
-`;
-}
-
 function notificationsRegistry(): string {
   return `import type { AnyNotificationDefinition } from '@framework/notifications';
 
@@ -751,101 +593,6 @@ function notificationsRegistry(): string {
 export const notifications: readonly AnyNotificationDefinition[] = [
   // @framework:notifications
 ];
-`;
-}
-
-function dataTokens(): string {
-  return `import { token } from '@framework/core';
-import type { DataPorter, ExportStore } from '@framework/crud';
-
-/** Shared export artifact store (local disk under storage/exports). */
-export const EXPORT_STORE = token<ExportStore>('data.export-store');
-
-/** Queued import/export dispatcher for the resources that opt in. */
-export const DATA_PORTER = token<DataPorter>('data.porter');
-`;
-}
-
-function dataProvider(): string {
-  return `import { defineProvider } from '@framework/core';
-import { DataPorter, LocalExportStore } from '@framework/crud';
-import { QUEUE, QueueManager } from '@framework/queue';
-import type { AppConfig } from '../../config';
-import { DATA_PORTER, EXPORT_STORE } from './data.tokens';
-
-/**
- * Queued import/export: a BullMQ connection (lazy — connects on first use),
- * the local export artifact store, and the dispatcher behind \`/api/v1/data\`.
- * To opt a module in: define its import/export jobs with \`defineImportJob\`
- * /\`defineExportJob\` (pass \`storeToken: EXPORT_STORE\`), list them below,
- * and add the resource name to \`dataOperations\` in \`bootstrap/app.ts\`.
- */
-export const dataProvider = defineProvider<AppConfig>({
-  name: 'data',
-  register({ container, config }) {
-    container.singleton(
-      QUEUE,
-      () =>
-        new QueueManager({
-          url: config.redis.url,
-          prefix: config.queue.prefix,
-          queue: config.queue.name,
-        }),
-      (queue) => queue.close(),
-    );
-    container.singleton(EXPORT_STORE, () => new LocalExportStore('storage/exports'));
-    container.scoped(
-      DATA_PORTER,
-      (r) =>
-        new DataPorter({
-          queue: r.resolve(QUEUE),
-          store: r.resolve(EXPORT_STORE),
-          imports: [],
-          exports: [],
-        }),
-    );
-  },
-});
-`;
-}
-
-function eventsProvider(): string {
-  return `import { defineProvider, EXECUTION_CONTEXT, token } from '@framework/core';
-import { EVENT_BUS, MemoryEventBus, RedisEventBus, WebsocketGateway } from '@framework/events';
-import { resolve } from '@framework/http';
-import type { AppConfig } from '../../config';
-
-export const WEBSOCKET_GATEWAY = token<WebsocketGateway>('events.websocket-gateway');
-
-/**
- * In-process events by default; Redis pub/sub for cross-instance fan-out
- * (config \`events.driver\`). The WebSocket gateway serves \`/ws\`: private
- * \`user.<id>\` channels for authenticated actors and presence broadcasts.
- */
-export const eventsProvider = defineProvider<AppConfig>({
-  name: 'events',
-  register({ container, config }) {
-    container.singleton(
-      EVENT_BUS,
-      () =>
-        config.events.driver === 'redis'
-          ? new RedisEventBus({ url: config.redis.url, prefix: config.app.name })
-          : new MemoryEventBus(),
-      (bus) => bus.close(),
-    );
-    container.singleton(
-      WEBSOCKET_GATEWAY,
-      (r) =>
-        new WebsocketGateway({
-          bus: r.resolve(EVENT_BUS),
-          authenticate: (c) => resolve(c, EXECUTION_CONTEXT).actor,
-          channels: ['events'],
-          presence: true,
-        }),
-      (gateway) => gateway.close(),
-    );
-  },
-});
 `;
 }
 
@@ -914,7 +661,7 @@ function dataRoutes(): string {
   return `import { EXECUTION_CONTEXT } from '@framework/core';
 import { importExportRoutes } from '@framework/crud';
 import { forbidden, resolve } from '@framework/http';
-import { DATA_PORTER } from '../app/providers/data.tokens';
+import { DATA_PORTER } from '@framework/presets';
 import { loadAppConfig } from '../config';
 
 // Loaded once; the authorization guard reads the validated env from it.

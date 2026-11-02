@@ -8,6 +8,15 @@ import { resolveInsideProject } from '../generators/paths';
 import { table } from '../output';
 import { loadConfigOrFail } from './project';
 
+/** Providers `apiPreset` installs unless its call sets that part to `false`. */
+const PRESET_PARTS: Readonly<Record<string, string>> = { cacheProvider: 'cache', storageProvider: 'storage' };
+
+function isRegistered(source: string, symbol: string): boolean {
+  if (source.includes(symbol)) return true;
+  const part = PRESET_PARTS[symbol];
+  return part !== undefined && /\bapiPreset[<(]/.test(source) && !new RegExp(`\\b${part}: false`).test(source);
+}
+
 /**
  * Textual capability gate for infrastructure commands: the corresponding
  * provider must be registered before the command runs. Same approach as
@@ -25,7 +34,7 @@ async function requireProvider(
   const source = await Bun.file(file)
     .text()
     .catch(() => '');
-  if (!source.includes(symbol)) {
+  if (!isRegistered(source, symbol)) {
     throw unsupported(
       `"${command}" requires the ${moduleName} module (no ${symbol} registered in ${context.project.paths.providers})`,
       hint,
