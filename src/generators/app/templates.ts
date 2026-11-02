@@ -233,9 +233,15 @@ STORAGE_DEFAULT=local
 STORAGE_ROOT=storage
 STORAGE_VISIBILITY=private
 
-# Outbound mail (console transport by default; memory for tests).
+# Outbound mail (console transport by default; memory for tests; smtp delivers).
 MAIL_DRIVER=console
 MAIL_FROM=no-reply@${name}.local
+# MAIL_SMTP_HOST=smtp.example.com
+# MAIL_SMTP_PORT=587
+# MAIL_SMTP_USER=
+# MAIL_SMTP_PASSWORD=
+# TLS is required unless you turn it off, e.g. for a local catcher such as Mailpit.
+# MAIL_SMTP_REQUIRE_TLS=false
 `;
 }
 
@@ -328,6 +334,7 @@ export default defineConfig({
 
 function config({ name }: AppTemplateInput): string {
   return `import { type DefineConfigLoadOptions, defineConfig, fromEnv, type InferConfig } from '@framework/core';
+import { smtpConfigSection } from '@framework/mail';
 import { z } from 'zod/v4';
 
 const booleanString = z.enum(['true', 'false']).transform((value) => value === 'true');
@@ -411,8 +418,9 @@ export const appConfig = defineConfig({
     }),
   }),
   mail: z.object({
-    driver: fromEnv('MAIL_DRIVER', z.enum(['console', 'memory']).default('console')),
+    driver: fromEnv('MAIL_DRIVER', z.enum(['console', 'memory', 'smtp']).default('console')),
     from: fromEnv('MAIL_FROM', z.string().trim().toLowerCase().email().default('no-reply@${name}.local')),
+    smtp: smtpConfigSection(),
   }),
   notifications: z.object({
     providers: z
