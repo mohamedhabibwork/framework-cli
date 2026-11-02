@@ -19,9 +19,6 @@ const PLANNED: readonly [string, CommandGroup, string][] = [
   ['oauth:client:create', 'oauth', 'Register an OAuth2 client (confidential or public)'],
   ['oauth:client:list', 'oauth', 'List registered OAuth2 clients'],
   ['oauth:key:generate', 'oauth', 'Generate the OAuth server signing key pair (JWKS)'],
-  ['observatory:list', 'observatory', 'List recent observatory entries'],
-  ['observatory:prune', 'observatory', 'Prune observatory entries older than a date'],
-  ['observatory:clear', 'observatory', 'Clear all observatory entries'],
 ];
 
 export const plannedCommands: Command[] = PLANNED.map(([name, group, description]) =>

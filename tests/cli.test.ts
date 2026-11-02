@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { socialProviders } from '../src/commands/project';
+import type { Command, CommandContext } from '../src/command';
+import { projectCommands, socialProviders } from '../src/commands/project';
+import type { ObservatoryHandle } from '../src/project';
 import { mkdir, mkdtemp, readlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -277,6 +279,88 @@ interface Envelope {
   data: unknown;
   error?: { code: string; message: string };
 }
+
+describe('observatory commands', () => {
+  const command = (name: string) => projectCommands.find((candidate) => candidate.name === name) as Command;
+  const calls: unknown[] = [];
+  const handle: ObservatoryHandle = {
+    query: async (filter) => {
+      calls.push(filter);
+      return [{ watcher: 'job', status: 'ok', summary: 'obs.job', occurredAt: '2026-01-01T00:00:00.000Z' }];
+    },
+    prune: async (before) => {
+      calls.push(before);
+      return 3;
+    },
+    clear: async () => {
+      calls.push('clear');
+    },
+    close: async () => {
+      calls.push('close');
+    },
+  };
+  const contextFor = (observatory?: () => Promise<ObservatoryHandle>) =>
+    ({
+      print: () => {},
+      project: { loadConfig: async () => ({}), ...(observatory ? { observatory } : {}) },
+    }) as unknown as CommandContext;
+  const input = (options: Record<string, unknown>) => ({ positionals: [], options }) as never;
+
+  test('list passes its filters, and closes the store', async () => {
+    calls.length = 0;
+    const result = await command('observatory:list').run(
+      input({ watcher: 'job', limit: '5' }),
+      contextFor(async () => handle),
+    );
+
+    expect(calls).toEqual([{ watcher: 'job', limit: 5 }, 'close']);
+    expect(result).toMatchObject({ data: { entries: [{ summary: 'obs.job' }] } });
+  });
+
+  test('prune keeps the requested hours', async () => {
+    calls.length = 0;
+    const before = Date.now() - 2 * 3_600_000;
+
+    const result = await command('observatory:prune').run(
+      input({ hours: '2' }),
+      contextFor(async () => handle),
+    );
+
+    expect(result).toMatchObject({ data: { removed: 3 } });
+    expect(Math.abs((calls[0] as Date).getTime() - before)).toBeLessThan(5_000);
+  });
+
+  test('clear needs --confirm', async () => {
+    calls.length = 0;
+
+    await expect(
+      command('observatory:clear').run(
+        input({}),
+        contextFor(async () => handle),
+      ),
+    ).rejects.toThrow('--confirm');
+    expect(calls).toEqual([]);
+
+    await command('observatory:clear').run(
+      input({ confirm: true }),
+      contextFor(async () => handle),
+    );
+    expect(calls).toEqual(['clear', 'close']);
+  });
+
+  test('bad numbers are a usage error', async () => {
+    await expect(
+      command('observatory:prune').run(
+        input({ hours: '-1' }),
+        contextFor(async () => handle),
+      ),
+    ).rejects.toThrow('--hours');
+  });
+
+  test('needs the project hook', async () => {
+    await expect(command('observatory:list').run(input({}), contextFor())).rejects.toThrow('observatory');
+  });
+});
 
 describe('socialite:providers', () => {
   test('lists names and redirects, never secrets', () => {

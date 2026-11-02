@@ -77,6 +77,24 @@ export interface SessionPruneHandle {
   close(): Promise<void>;
 }
 
+/** One observatory entry, as `observatory:list` prints it. */
+export interface ObservatoryEntryRow {
+  readonly watcher: string;
+  readonly status: string;
+  readonly summary: string;
+  readonly occurredAt: string;
+}
+
+/** The observatory store, for the `observatory:*` commands. */
+export interface ObservatoryHandle {
+  query(filter: { readonly watcher?: string; readonly limit?: number }): Promise<readonly ObservatoryEntryRow[]>;
+  /** Removes entries older than `before`; returns the number deleted. */
+  prune(before: Date): Promise<number>;
+  clear(): Promise<void>;
+  /** Releases the underlying connection; idempotent. */
+  close(): Promise<void>;
+}
+
 /**
  * Application-local hooks. Everything that needs the application's own code
  * goes through here, so the framework CLI never guesses project structure
@@ -99,6 +117,8 @@ export interface ProjectAdapter {
   cache?(config: unknown): Promise<CacheClearHandle>;
   /** Opens the session store for `session:prune`; omitting it disables execution (exit 3). */
   sessions?(config: unknown): Promise<SessionPruneHandle>;
+  /** Opens the observatory store for `observatory:*`; omitting it disables execution (exit 3). */
+  observatory?(config: unknown): Promise<ObservatoryHandle>;
   /** Registered seeders for `db:seed`; omitting it disables execution (exit 3). */
   seeders?(): Promise<readonly Seeder[]>;
   /** Route table of the composed HTTP app; must not open connections. */

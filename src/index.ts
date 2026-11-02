@@ -5,7 +5,7 @@ export { EXIT, GLOBAL_OPTIONS } from './constants';
 export { CliError, type ExitCode, failure, unsupported, usageError } from './errors';
 export { envelope, type JsonEnvelope, table } from './output';
 export { type ProcessResult, runProcess } from './process';
-export { defineProject, type SessionPruneHandle } from './project';
+export { defineProject, type ObservatoryHandle, type SessionPruneHandle } from './project';
 export { CommandRegistry } from './registry';
 export { type RunOptions, runCli } from './run';
 // Grouped conventions: every type in ./types, every constant in ./constants.

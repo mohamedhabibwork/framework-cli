@@ -1,9 +1,10 @@
 import { redact } from '@framework/core';
 import { createConnection, pingDatabase } from '@framework/database';
-import { stringOption } from '../args';
+import { flag, stringOption } from '../args';
 import { type CommandContext, defineCommand } from '../command';
-import { failure, usageError } from '../errors';
+import { failure, unsupported, usageError } from '../errors';
 import { table } from '../output';
+import type { ObservatoryHandle } from '../project';
 import { helpText } from '../run';
 
 async function loadConfigOrFail(context: CommandContext): Promise<unknown> {
@@ -56,7 +57,88 @@ export function socialProviders(config: unknown): readonly { provider: string; r
   }));
 }
 
+const MS_PER_HOUR = 3_600_000;
+const DEFAULT_LIST_LIMIT = 50;
+const DEFAULT_PRUNE_HOURS = 24;
+
+async function withObservatory<T>(
+  context: CommandContext,
+  command: string,
+  run: (handle: ObservatoryHandle) => Promise<T>,
+): Promise<T> {
+  if (!context.project.observatory) {
+    throw unsupported(
+      `"${command}" needs access to the observatory store`,
+      'Add an `observatory(config)` hook to this project CLI adapter, or install @framework/observatory.',
+    );
+  }
+  const handle = await context.project.observatory(await loadConfigOrFail(context));
+  try {
+    return await run(handle);
+  } finally {
+    await handle.close();
+  }
+}
+
+const positiveNumber = (value: string | undefined, name: string, fallback: number): number => {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw usageError(`--${name} must be a positive number`);
+  return parsed;
+};
+
 export const projectCommands = [
+  defineCommand({
+    name: 'observatory:list',
+    group: 'observatory',
+    status: 'implemented',
+    description: 'List recent observatory entries',
+    options: [
+      { name: 'watcher', type: 'string', description: 'Only this watcher (request, query, job, ...)' },
+      { name: 'limit', type: 'string', description: `Most entries to show (default: ${DEFAULT_LIST_LIMIT})` },
+    ],
+    async run({ options }, context) {
+      const watcher = stringOption(options, 'watcher');
+      const limit = positiveNumber(stringOption(options, 'limit'), 'limit', DEFAULT_LIST_LIMIT);
+      const entries = await withObservatory(context, 'observatory:list', (handle) =>
+        handle.query({ ...(watcher ? { watcher } : {}), limit }),
+      );
+      for (const entry of entries) {
+        context.print(`${entry.occurredAt}  ${entry.watcher}  ${entry.status}  ${entry.summary}`);
+      }
+      if (entries.length === 0) context.print('No observatory entries.');
+      return { data: { entries } };
+    },
+  }),
+  defineCommand({
+    name: 'observatory:prune',
+    group: 'observatory',
+    status: 'implemented',
+    description: 'Prune observatory entries older than a number of hours',
+    options: [
+      { name: 'hours', type: 'string', description: `Keep this many recent hours (default: ${DEFAULT_PRUNE_HOURS})` },
+    ],
+    async run({ options }, context) {
+      const hours = positiveNumber(stringOption(options, 'hours'), 'hours', DEFAULT_PRUNE_HOURS);
+      const before = new Date(Date.now() - hours * MS_PER_HOUR);
+      const removed = await withObservatory(context, 'observatory:prune', (handle) => handle.prune(before));
+      context.print(`Removed ${removed} observatory entries.`);
+      return { data: { removed } };
+    },
+  }),
+  defineCommand({
+    name: 'observatory:clear',
+    group: 'observatory',
+    status: 'implemented',
+    description: 'Clear all observatory entries (--confirm required)',
+    options: [{ name: 'confirm', type: 'boolean', description: 'Confirm deleting every entry' }],
+    async run({ options }, context) {
+      if (!flag(options, 'confirm')) throw usageError('"observatory:clear" deletes every entry; pass --confirm');
+      await withObservatory(context, 'observatory:clear', (handle) => handle.clear());
+      context.print('Cleared the observatory.');
+      return { data: { cleared: true } };
+    },
+  }),
   defineCommand({
     name: 'socialite:providers',
     group: 'socialite',
