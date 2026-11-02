@@ -190,3 +190,47 @@ export function renderOpenApi(def: ResourceDefinition, files: CrudFiles): string
     '',
   ].join('\n');
 }
+
+/**
+ * A module of one `defineResource` call. Schemas stay in their own file: they
+ * hold the column refinements and the explicit response allowlist.
+ */
+export function renderCompactIndex(def: ResourceDefinition, files: CrudFiles): string {
+  const { pascal, camel, pluralPascal, pluralCamel } = def.names;
+  const segment = def.mount.split('/').at(-1) as string;
+  return [
+    "import { defineResource } from '@framework/crud';",
+    "import type { z } from 'zod/v4';",
+    `import { ${def.tableExport} } from '${importPath(files.index, def.schemaFile)}';`,
+    'import {',
+    `  create${pascal}Schema,`,
+    `  ${camel}IdParamSchema,`,
+    `  ${camel}ResponseSchema,`,
+    `  list${pluralPascal}QuerySchema,`,
+    `  update${pascal}Schema,`,
+    `} from './schemas';`,
+    '',
+    "export * from './schemas';",
+    `export type Create${pascal}Input = z.input<typeof create${pascal}Schema>;`,
+    '',
+    '/**',
+    ' * The whole module: listed in `defineApp({ modules })`. Pass `repository`,',
+    ' * `service`, `controller` or `toResponse` to replace a layer.',
+    ' */',
+    `export const ${pluralCamel}Module = defineResource(${def.tableExport}, {`,
+    `  access: '${def.access}',`,
+    `  name: '${pascal}',`,
+    `  path: '/${segment}',`,
+    `  abilityPrefix: '${pluralCamel}',`,
+    `  softDelete: ${def.softDelete},`,
+    '  schemas: {',
+    `    create: create${pascal}Schema,`,
+    `    update: update${pascal}Schema,`,
+    `    response: ${camel}ResponseSchema,`,
+    `    query: list${pluralPascal}QuerySchema,`,
+    `    param: ${camel}IdParamSchema,`,
+    '  },',
+    '});',
+    '',
+  ].join('\n');
+}

@@ -43,7 +43,7 @@ async function hashes(paths: readonly string[]): Promise<Record<string, number |
 }
 
 const UNRELATED = [
-  'app/modules/products/routes.ts',
+  'app/modules/products/index.ts',
   'app/modules/products/schemas.ts',
   'database/schema/products.ts',
   'database/migrations/0000_create-products.sql',

@@ -50,20 +50,20 @@ async function snapshot(root: string): Promise<string[]> {
 
 /**
  * Self-contained dry runs against a pristine tree: the module-coupled slices
- * point at the playground's existing products module with --force (a dry run
+ * point at the expanded gadgets module beforeAll generates, with --force (a dry run
  * writes nothing, but existing files are still conflicts by contract).
  */
 const DRY_RUNS: readonly (readonly string[])[] = [
   ['make:schema', 'Invoice', '--fields', 'total:numeric:required,status:text:required', '--soft-delete'],
-  ['make:repository', 'Product', '--table', 'products', '--force'],
-  ['make:dto', 'Product', '--table', 'products', '--force'],
-  ['make:policy', 'Product', '--access', 'public', '--force'],
-  ['make:request', 'Product', '--table', 'products', '--force'],
-  ['make:request', 'Product', '--table', 'products', '--kind', 'list', '--force'],
-  ['make:response', 'Product', '--table', 'products', '--force'],
-  ['make:model', 'Product', '--table', 'products', '--force'],
-  ['make:service', 'Product', '--table', 'products', '--force'],
-  ['make:controller', 'Product', '--table', 'products', '--force'],
+  ['make:repository', 'Gadget', '--table', 'gadgets', '--force'],
+  ['make:dto', 'Gadget', '--table', 'gadgets', '--force'],
+  ['make:policy', 'Gadget', '--access', 'public', '--force'],
+  ['make:request', 'Gadget', '--table', 'gadgets', '--force'],
+  ['make:request', 'Gadget', '--table', 'gadgets', '--kind', 'list', '--force'],
+  ['make:response', 'Gadget', '--table', 'gadgets', '--force'],
+  ['make:model', 'Gadget', '--table', 'gadgets', '--force'],
+  ['make:service', 'Gadget', '--table', 'gadgets', '--force'],
+  ['make:controller', 'Gadget', '--table', 'gadgets', '--force'],
   ['make:middleware', 'idempotency-key'],
   ['make:provider', 'search'],
   ['make:event', 'order-paid'],
@@ -82,20 +82,20 @@ const DRY_RUNS: readonly (readonly string[])[] = [
 /**
  * Real runs in two chains: a fresh Invoice module starts table-first
  * (schema → repository → policy need no module siblings), while the
- * module-coupled slices regenerate the products module's own artifacts with
+ * module-coupled slices regenerate the gadgets module's own artifacts with
  * --force — the same renderers make:crud used, so the module stays coherent.
  */
 const GENERATIONS: readonly (readonly string[])[] = [
   ['make:schema', 'Invoice', '--fields', 'total:numeric:required,status:text:required', '--soft-delete'],
   ['make:repository', 'Invoice'],
   ['make:policy', 'Invoice', '--access', 'public'],
-  ['make:dto', 'Product', '--table', 'products', '--force'],
-  ['make:request', 'Product', '--table', 'products', '--force'],
-  ['make:request', 'Product', '--table', 'products', '--kind', 'list', '--force'],
-  ['make:response', 'Product', '--table', 'products', '--force'],
-  ['make:model', 'Product', '--table', 'products', '--force'],
-  ['make:service', 'Product', '--table', 'products', '--force'],
-  ['make:controller', 'Product', '--table', 'products', '--force'],
+  ['make:dto', 'Gadget', '--table', 'gadgets', '--force'],
+  ['make:request', 'Gadget', '--table', 'gadgets', '--force'],
+  ['make:request', 'Gadget', '--table', 'gadgets', '--kind', 'list', '--force'],
+  ['make:response', 'Gadget', '--table', 'gadgets', '--force'],
+  ['make:model', 'Gadget', '--table', 'gadgets', '--force'],
+  ['make:service', 'Gadget', '--table', 'gadgets', '--force'],
+  ['make:controller', 'Gadget', '--table', 'gadgets', '--force'],
   ['make:middleware', 'idempotency-key'],
   ['make:provider', 'search'],
   ['make:event', 'order-paid'],
@@ -119,6 +119,16 @@ beforeAll(async () => {
   app = join(SCRATCH, `generators-${randomBytes(4).toString('hex')}`);
   const copy = Bun.spawn(['cp', '-R', STARTER, app], { cwd: WORKSPACE, stdout: 'pipe', stderr: 'pipe' });
   expect(await copy.exited).toBe(0);
+  // The slice generators extend an expanded module; the playground's own modules are compact.
+  const gadgets = await cli([
+    'make:crud',
+    'Gadget',
+    '--fields',
+    'name:text:required,price:numeric:required',
+    '--access',
+    'public',
+  ]);
+  expect(`${gadgets.code}: ${gadgets.stderr}`).toBe('0: ');
 }, 300_000);
 
 afterAll(async () => {

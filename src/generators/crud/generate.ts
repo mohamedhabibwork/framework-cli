@@ -22,7 +22,7 @@ import {
   renderResponse,
   renderService,
 } from './templates-layers';
-import { renderIndex, renderOpenApi, renderProvider, renderRoutes } from './templates-module';
+import { renderCompactIndex, renderIndex, renderOpenApi, renderProvider, renderRoutes } from './templates-module';
 import { renderDto, renderSchemas, renderTable } from './templates-schema';
 import { renderApiTest, renderFactory } from './templates-tests';
 
@@ -206,6 +206,19 @@ export async function resolveDefinition(context: CommandContext, request: CrudRe
   });
 }
 
+/** Compact modules are one `defineResource` call plus their schemas; expanded ones own every layer. */
+export type CrudLayout = 'expanded' | 'compact';
+
+function renderCompactFiles(def: ResourceDefinition, files: CrudFiles): NewFile[] {
+  return [
+    ...(def.source === 'new' ? [{ path: def.schemaFile, content: renderTable(def) }] : []),
+    { path: files.schemas, content: renderSchemas(def, files) },
+    { path: files.index, content: renderCompactIndex(def, files) },
+    { path: files.test, content: renderApiTest(def, files) },
+    { path: files.factory, content: renderFactory(def, files) },
+  ];
+}
+
 function renderFiles(context: CommandContext, def: ResourceDefinition, files: CrudFiles): NewFile[] {
   const requests = renderRequests(def, files);
   return [
@@ -342,7 +355,12 @@ function registrations(context: CommandContext, def: ResourceDefinition, files: 
 }
 
 /** Computes the full reviewed change set without writing anything. */
-export async function planCrud(context: CommandContext, def: ResourceDefinition, force: boolean): Promise<CrudPlan> {
+export async function planCrud(
+  context: CommandContext,
+  def: ResourceDefinition,
+  force: boolean,
+  layout: CrudLayout = 'expanded',
+): Promise<CrudPlan> {
   const files = crudFiles(def, context.project.paths);
   if (!force && (await Bun.file(resolveInsideProject(context.root, files.index)).exists())) {
     throw usageError(
@@ -351,10 +369,13 @@ export async function planCrud(context: CommandContext, def: ResourceDefinition,
     );
   }
   const { app } = context.project.paths;
+  if (layout === 'compact' && app === undefined) {
+    throw usageError('--compact needs a defineApp module to register in', 'Set paths.app in bin/cli.ts.');
+  }
   if (app !== undefined) await assertMountFree(context, app, def, files);
   const changes = await buildChanges(
     context.root,
-    renderFiles(context, def, files),
+    layout === 'compact' ? renderCompactFiles(def, files) : renderFiles(context, def, files),
     registrations(context, def, files),
     force,
   );

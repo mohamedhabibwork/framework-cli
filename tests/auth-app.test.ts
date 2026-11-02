@@ -192,6 +192,31 @@ describe('Phase 3 gate: authenticated CRUD in a generated app', () => {
   );
 
   test(
+    'make:crud --compact --access authenticated --verify passes with 401/403 endpoint cases',
+    async () => {
+      const crud = await cliIn([
+        '--json',
+        'make:crud',
+        'Memo',
+        '--module',
+        'memos',
+        '--fields',
+        'title:text:required',
+        '--access',
+        'authenticated',
+        '--compact',
+        '--verify',
+      ]);
+      expect(crud.stderr).not.toContain('VERIFICATION_FAILED');
+      expect(crud.code).toBe(0);
+      const body = JSON.parse(crud.stdout) as { data: { verification: { status: string; passed: number } } };
+      expect(body.data.verification.status).toBe('passed');
+      expect(body.data.verification.passed).toBeGreaterThanOrEqual(7);
+    },
+    TIMEOUT,
+  );
+
+  test(
     'the full generated suite (health + notes + auth fixtures) passes',
     async () => {
       const suite = await capture(

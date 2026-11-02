@@ -68,6 +68,8 @@ const CRUD_OPTIONS: readonly OptionSpec[] = [
     values: ['in-process', 'network'],
     description: 'Endpoint test transport (default in-process)',
   },
+  { name: 'compact', type: 'boolean', description: 'One defineResource call plus schemas, instead of every layer' },
+  { name: 'expanded', type: 'boolean', description: 'Generate every layer as editable files (default)' },
   { name: 'dry-run', type: 'boolean', description: 'Preview changes and test plan; write nothing' },
   { name: 'force', type: 'boolean', description: 'Overwrite generator-owned files of this module' },
 ];
@@ -78,6 +80,9 @@ async function runCrud(
   context: CommandContext,
   moduleName?: string,
 ): Promise<CommandResult> {
+  if (flag(options, 'compact') && flag(options, 'expanded')) {
+    throw usageError('Use either --compact or --expanded, not both');
+  }
   const definition = await resolveDefinition(context, {
     resource,
     module: moduleName ?? stringOption(options, 'module'),
@@ -90,7 +95,12 @@ async function runCrud(
     softDelete: flag(options, 'soft-delete'),
     access: stringOption(options, 'access'),
   });
-  const plan = await planCrud(context, definition, flag(options, 'force'));
+  const plan = await planCrud(
+    context,
+    definition,
+    flag(options, 'force'),
+    flag(options, 'compact') ? 'compact' : 'expanded',
+  );
   const mode = (stringOption(options, 'test-mode') ?? 'in-process') as TestMode;
   const summary = {
     resource: definition.names.pascal,
@@ -169,6 +179,7 @@ export const generatorCommands = [
       "make:crud Product --module products --fields 'name:text:required,price:numeric:required' --access public --verify",
       'make:crud Product --module products --table products --access public --verify',
       "make:crud Note --fields 'body:text:required' --access public --dry-run",
+      "make:crud Note --fields 'body:text:required' --access public --compact --verify",
     ],
     async run({ positionals, options }, context) {
       const resource = positionals[0];

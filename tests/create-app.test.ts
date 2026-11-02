@@ -394,6 +394,48 @@ describe('create --with-demo (one-command full generation)', () => {
   );
 
   test(
+    'make:crud --compact --verify passes the same generated suite with one defineResource call',
+    async () => {
+      const crud = await capture(
+        Bun.spawn(
+          [
+            'bun',
+            'run',
+            'cli',
+            '--',
+            '--json',
+            'make:crud',
+            'Widget',
+            '--module',
+            'widgets',
+            '--fields',
+            'name:text:required,price:numeric:required',
+            '--access',
+            'public',
+            '--soft-delete',
+            '--compact',
+            '--verify',
+          ],
+          { cwd: app, env: childEnv(), stdout: 'pipe', stderr: 'pipe' },
+        ),
+      );
+      expect(crud.stderr).not.toContain('VERIFICATION_FAILED');
+      expect(crud.code).toBe(0);
+      const body = JSON.parse(crud.stdout) as {
+        data: { verification: { status: string; typecheck: string; passed: number; failed: number } };
+      };
+      expect(body.data.verification).toMatchObject({ status: 'passed', typecheck: 'passed', failed: 0 });
+      expect(body.data.verification.passed).toBeGreaterThanOrEqual(6);
+
+      const generated = await Array.fromAsync(new Bun.Glob('**/*').scan({ cwd: join(app, 'app/modules/widgets') }));
+      expect(generated.toSorted()).toEqual(['index.ts', 'schemas.ts', 'tests/widget.crud.api.test.ts']);
+      const bootstrap = await Bun.file(join(app, 'bootstrap/app.ts')).text();
+      expect(bootstrap).toContain('widgetsModule,');
+    },
+    TIMEOUT,
+  );
+
+  test(
     'the sample module is registered: routes and OpenAPI list it',
     async () => {
       const routes = await capture(
