@@ -9,6 +9,7 @@ import { type AuthFiles, authFiles, renderAuthIndex, renderAuthProvider, renderA
 const BOOTSTRAP_HTTP = 'bootstrap/http.ts';
 const ROUTE_MOUNT = ".route('/api/v1/auth', authRoutes(config))";
 /** `defineApp` anchors: the kernel options callback and the app-routes hook marker. */
+const CONFIG_ENV_MARKER = '@framework:config-env-sections';
 const APP_KERNEL_ANCHOR = 'http: (config) => ({';
 const APP_ROUTE_MOUNT = "http.route('/api/v1/auth', authRoutes(config));";
 
@@ -109,7 +110,10 @@ export async function planAuth(
       transform: (source) => {
         let next = addImport(source, "import { authConfigSchema } from '@framework/auth';");
         next = insertAfterMarker(next, '@framework:config-schema-sections', schemaSection, paths.config);
-        return insertAfterMarker(next, '@framework:config-env-sections', 'auth: {},', paths.config);
+        // Apps on `defineConfig` derive the mapping; older apps keep a hand-written one.
+        return next.includes(CONFIG_ENV_MARKER)
+          ? insertAfterMarker(next, CONFIG_ENV_MARKER, 'auth: {},', paths.config)
+          : next;
       },
     },
     {
