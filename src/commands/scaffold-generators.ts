@@ -212,7 +212,7 @@ export const scaffoldGeneratorCommands = [
     name: 'make:provider',
     group: 'generators',
     status: 'implemented',
-    description: 'Provider lifecycle factory registered in bootstrap/providers.ts',
+    description: 'Provider lifecycle factory registered in the providers file',
     arguments: [{ name: 'name', description: 'Provider name in PascalCase or kebab-case', required: true }],
     options: COMMON_OPTIONS,
     examples: ['make:provider search'],

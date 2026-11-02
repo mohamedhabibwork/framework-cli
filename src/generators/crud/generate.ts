@@ -222,18 +222,66 @@ function renderFiles(context: CommandContext, def: ResourceDefinition, files: Cr
     { path: files.policy, content: renderPolicy(def) },
     { path: files.routes, content: renderRoutes(def, files) },
     { path: files.provider, content: renderProvider(def, files, context.project.paths.config) },
-    { path: files.index, content: renderIndex(def, files) },
+    {
+      path: files.index,
+      content: renderIndex(
+        def,
+        files,
+        context.project.paths.app ? { config: context.project.paths.config } : undefined,
+      ),
+    },
     { path: files.openapi, content: renderOpenApi(def, files) },
     { path: files.test, content: renderApiTest(def, files) },
     { path: files.factory, content: renderFactory(def, files) },
   ];
 }
 
+/** One line in the `defineApp` module: the generated module carries its provider, routes and operations. */
+function moduleRegistration(app: string, def: ResourceDefinition, files: CrudFiles): FileUpdate {
+  const { pluralCamel } = def.names;
+  return {
+    path: app,
+    transform: (source) => {
+      if (source.includes(`${pluralCamel}Module,`)) {
+        throw usageError(`Module collision: ${pluralCamel}Module is already registered in ${app}`);
+      }
+      return insertAfterMarker(
+        addImport(source, `import { ${pluralCamel}Module } from '${importPath(app, files.index)}';`),
+        '@framework:modules',
+        `${pluralCamel}Module,`,
+        app,
+      );
+    },
+  };
+}
+
+/** The legacy registration paths a project must declare when it has no `defineApp` module. */
+function legacyPaths(context: CommandContext): { readonly apiRoutes: string; readonly openapi: string } {
+  const { apiRoutes, openapi } = context.project.paths;
+  if (apiRoutes === undefined || openapi === undefined) {
+    throw usageError(
+      'make:crud needs somewhere to register the module',
+      'Set paths.app to the defineApp module (bootstrap/app.ts), or paths.apiRoutes and paths.openapi.',
+    );
+  }
+  return { apiRoutes, openapi };
+}
+
 function registrations(context: CommandContext, def: ResourceDefinition, files: CrudFiles): FileUpdate[] {
   const paths = context.project.paths;
   const { camel, pluralCamel, pluralKebab } = def.names;
   const segment = def.mount.split('/').at(-1) as string;
-  const updates: FileUpdate[] = [
+  const schemaExport: FileUpdate = {
+    path: paths.schemaIndex,
+    transform: (source) =>
+      insertAfterMarker(source, '@framework:schema-exports', `export * from './${pluralKebab}';`, paths.schemaIndex),
+  };
+  const schemaUpdates = def.source === 'new' ? [schemaExport] : [];
+  if (paths.app !== undefined) return [...schemaUpdates, moduleRegistration(paths.app, def, files)];
+
+  const { apiRoutes, openapi } = legacyPaths(context);
+  return [
+    ...schemaUpdates,
     {
       path: paths.providers,
       transform: (source) =>
@@ -245,38 +293,30 @@ function registrations(context: CommandContext, def: ResourceDefinition, files: 
         ),
     },
     {
-      path: paths.apiRoutes,
+      path: apiRoutes,
       transform: (source) => {
         if (source.includes(`.route('/${segment}'`)) {
-          throw usageError(`Route collision: ${def.mount} is already mounted in ${paths.apiRoutes}`);
+          throw usageError(`Route collision: ${def.mount} is already mounted in ${apiRoutes}`);
         }
         return insertAfterMarker(
-          addImport(source, `import { ${camel}Routes } from '${importPath(paths.apiRoutes, files.index)}';`),
+          addImport(source, `import { ${camel}Routes } from '${importPath(apiRoutes, files.index)}';`),
           '@framework:routes',
           `.route('/${segment}', ${camel}Routes)`,
-          paths.apiRoutes,
+          apiRoutes,
         );
       },
     },
     {
-      path: paths.openapi,
+      path: openapi,
       transform: (source) =>
         insertAfterMarker(
-          addImport(source, `import { ${camel}Operations } from '${importPath(paths.openapi, files.openapi)}';`),
+          addImport(source, `import { ${camel}Operations } from '${importPath(openapi, files.openapi)}';`),
           '@framework:openapi-operations',
           `...${camel}Operations,`,
-          paths.openapi,
+          openapi,
         ),
     },
   ];
-  if (def.source === 'new') {
-    updates.unshift({
-      path: paths.schemaIndex,
-      transform: (source) =>
-        insertAfterMarker(source, '@framework:schema-exports', `export * from './${pluralKebab}';`, paths.schemaIndex),
-    });
-  }
-  return updates;
 }
 
 /** Computes the full reviewed change set without writing anything. */

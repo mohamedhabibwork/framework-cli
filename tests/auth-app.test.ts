@@ -121,8 +121,7 @@ describe('Phase 3 gate: authenticated CRUD in a generated app', () => {
         'app/modules/auth/routes.ts',
         'config/index.ts',
         'database/schema/index.ts',
-        'bootstrap/providers.ts',
-        'bootstrap/http.ts',
+        'bootstrap/app.ts',
         'package.json',
       ]) {
         expect(paths).toContain(expected);
@@ -133,10 +132,11 @@ describe('Phase 3 gate: authenticated CRUD in a generated app', () => {
       expect(pkg.dependencies['@framework/auth']).toBe('workspace:*');
       const schemaIndex = await Bun.file(join(app, 'database/schema/index.ts')).text();
       expect(schemaIndex).toContain('apiTokens');
-      const providers = await Bun.file(join(app, 'bootstrap/providers.ts')).text();
-      expect(providers).toContain('authProvider');
-      const http = await Bun.file(join(app, 'bootstrap/http.ts')).text();
-      expect(http).toContain('/api/v1/auth');
+      // One file carries the provider, the kernel guard and the route mount.
+      const bootstrap = await Bun.file(join(app, 'bootstrap/app.ts')).text();
+      expect(bootstrap).toContain('authProvider,');
+      expect(bootstrap).toContain('resolveActor: authActorResolver(application)');
+      expect(bootstrap).toContain("http.route('/api/v1/auth', authRoutes(config));");
       const config = await Bun.file(join(app, 'config/index.ts')).text();
       expect(config).toContain('auth: authConfigSchema');
 

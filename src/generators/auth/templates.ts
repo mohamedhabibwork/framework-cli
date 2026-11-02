@@ -27,7 +27,7 @@ export function renderAuthProvider(files: AuthFiles, configFile: string): string
     '/**',
     ' * Session + personal API token authentication over the framework-owned',
     ' * `users`/`sessions`/`api_tokens` tables (singletons on the database',
-    ' * connection). The guard is wired into the HTTP kernel by bootstrap/http.ts.',
+    ' * connection). make:auth wires the guard into the HTTP kernel options (resolveActor).',
     ' */',
     'export const authProvider = createAuthProvider<AppConfig>();',
     '',

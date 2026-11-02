@@ -9,11 +9,18 @@ export interface ProjectPaths {
   readonly schemaIndex: string;
   readonly factories: string;
   readonly migrations: string;
-  readonly apiRoutes: string;
+  /**
+   * `defineApp` module: `make:crud` registers each generated module once, at
+   * its `@framework:modules` marker. When set, `apiRoutes` and `openapi` are unused.
+   */
+  readonly app?: string;
+  /** Legacy route table (`@framework:routes`), used by `make:crud` when `app` is unset. */
+  readonly apiRoutes?: string;
   readonly providers: string;
   /** Middleware registry module receiving `make:middleware` aliases. */
   readonly middleware: string;
-  readonly openapi: string;
+  /** Legacy operations list (`@framework:openapi-operations`), used when `app` is unset. */
+  readonly openapi?: string;
   /** Module exporting the application's `AppConfig` type. */
   readonly config: string;
   /** Module exporting `createTestContext()` for endpoint tests. */

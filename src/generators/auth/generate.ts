@@ -5,9 +5,12 @@ import { buildChanges, type FileChange, type FileUpdate, type NewFile } from '..
 import { addImport, insertAfterMarker } from '../registration';
 import { type AuthFiles, authFiles, renderAuthIndex, renderAuthProvider, renderAuthRoutes } from './templates';
 
-/** The bootstrap composition file both `create` and existing apps use. */
+/** The legacy bootstrap composition file (apps without a `defineApp` module). */
 const BOOTSTRAP_HTTP = 'bootstrap/http.ts';
 const ROUTE_MOUNT = ".route('/api/v1/auth', authRoutes(config))";
+/** `defineApp` anchors: the kernel options callback and the app-routes hook marker. */
+const APP_KERNEL_ANCHOR = 'http: (config) => ({';
+const APP_ROUTE_MOUNT = "http.route('/api/v1/auth', authRoutes(config));";
 
 /** Framework auth tables re-exported from the app's schema index. */
 const AUTH_TABLE_EXPORTS = ['accountTokens', 'apiTokens', 'sessions', 'totpRecoveryCodes', 'users'] as const;
@@ -124,41 +127,80 @@ export async function planAuth(
           paths.providers,
         ),
     },
-    {
-      path: BOOTSTRAP_HTTP,
-      transform: (source) => {
-        if (source.includes('/api/v1/auth')) {
-          throw usageError(`Route collision: /api/v1/auth is already mounted in ${BOOTSTRAP_HTTP}`);
-        }
-        const mountAnchor = ".route('/api/v1', apiRoutes)";
-        if (!source.includes(mountAnchor)) {
-          throw failure(
-            'REGISTRATION_MARKER_MISSING',
-            `Anchor "${mountAnchor}" not found in ${BOOTSTRAP_HTTP}`,
-            "Mount the auth routes manually: .route('/api/v1/auth', authRoutes(config)),",
-          );
-        }
-        // The guard resolves identity before the request scope exists; without
-        // it the kernel would treat every request as anonymous.
-        const kernelAnchor = 'createHttpKernel(application, {';
-        if (!source.includes(kernelAnchor)) {
-          throw failure(
-            'REGISTRATION_MARKER_MISSING',
-            `Anchor "${kernelAnchor}" not found in ${BOOTSTRAP_HTTP}`,
-            'Wire the guard manually: resolveActor: authActorResolver(application), in the kernel options.',
-          );
-        }
-        const withImports = addImport(
-          addImport(source, `import { authActorResolver } from '@framework/auth';`),
-          `import { authRoutes } from '${importPath(BOOTSTRAP_HTTP, files.index)}';`,
-        );
-        return withImports
-          .replace(kernelAnchor, `${kernelAnchor}\n    resolveActor: authActorResolver(application),`)
-          .replace(mountAnchor, `${mountAnchor}\n    ${ROUTE_MOUNT}`);
-      },
-    },
+    paths.app === undefined ? legacyHttpUpdate(files) : appUpdate(paths.app, files),
   ];
 
   const changes = await buildChanges(context.root, newFiles, updates, force);
   return { files, guards, changes, migrationName: 'create-auth-tables' };
+}
+
+/** Wires the guard into the kernel options and mounts the routes in the `defineApp` module. */
+function appUpdate(app: string, files: AuthFiles): FileUpdate {
+  return {
+    path: app,
+    transform: (source) => {
+      if (source.includes('/api/v1/auth')) {
+        throw usageError(`Route collision: /api/v1/auth is already mounted in ${app}`);
+      }
+      // The guard resolves identity before the request scope exists; without
+      // it the kernel would treat every request as anonymous.
+      if (!source.includes(APP_KERNEL_ANCHOR)) {
+        throw failure(
+          'REGISTRATION_MARKER_MISSING',
+          `Anchor "${APP_KERNEL_ANCHOR}" not found in ${app}`,
+          'Wire the guard manually: http: (config, application) => ({ resolveActor: authActorResolver(application), … }).',
+        );
+      }
+      const withImports = addImport(
+        addImport(source, `import { authActorResolver } from '@framework/auth';`),
+        `import { authRoutes } from '${importPath(app, files.index)}';`,
+      );
+      return insertAfterMarker(
+        withImports.replace(
+          APP_KERNEL_ANCHOR,
+          'http: (config, application) => ({\n    resolveActor: authActorResolver(application),',
+        ),
+        '@framework:app-routes',
+        APP_ROUTE_MOUNT,
+        app,
+      );
+    },
+  };
+}
+
+/** Patches the legacy `bootstrap/http.ts` composition. */
+function legacyHttpUpdate(files: AuthFiles): FileUpdate {
+  return {
+    path: BOOTSTRAP_HTTP,
+    transform: (source) => {
+      if (source.includes('/api/v1/auth')) {
+        throw usageError(`Route collision: /api/v1/auth is already mounted in ${BOOTSTRAP_HTTP}`);
+      }
+      const mountAnchor = ".route('/api/v1', apiRoutes)";
+      if (!source.includes(mountAnchor)) {
+        throw failure(
+          'REGISTRATION_MARKER_MISSING',
+          `Anchor "${mountAnchor}" not found in ${BOOTSTRAP_HTTP}`,
+          "Mount the auth routes manually: .route('/api/v1/auth', authRoutes(config)),",
+        );
+      }
+      // The guard resolves identity before the request scope exists; without
+      // it the kernel would treat every request as anonymous.
+      const kernelAnchor = 'createHttpKernel(application, {';
+      if (!source.includes(kernelAnchor)) {
+        throw failure(
+          'REGISTRATION_MARKER_MISSING',
+          `Anchor "${kernelAnchor}" not found in ${BOOTSTRAP_HTTP}`,
+          'Wire the guard manually: resolveActor: authActorResolver(application), in the kernel options.',
+        );
+      }
+      const withImports = addImport(
+        addImport(source, `import { authActorResolver } from '@framework/auth';`),
+        `import { authRoutes } from '${importPath(BOOTSTRAP_HTTP, files.index)}';`,
+      );
+      return withImports
+        .replace(kernelAnchor, `${kernelAnchor}\n    resolveActor: authActorResolver(application),`)
+        .replace(mountAnchor, `${mountAnchor}\n    ${ROUTE_MOUNT}`);
+    },
+  };
 }

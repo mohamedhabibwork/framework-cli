@@ -45,7 +45,7 @@ export const ${constant(id.kebab)}_SERVICE = token<${id.pascal}Service>('${id.ke
 /**
  * ${id.pascal} provider lifecycle: register bindings here; add boot/shutdown
  * hooks when resources need starting or draining. Registered in
- * bootstrap/providers.ts and visible in \`module:list\`.
+ * the providers file (bootstrap/app.ts) and visible in \`module:list\`.
  */
 export const ${camel(id.kebab)}Provider = defineProvider<AppConfig>({
   name: '${id.kebab}',

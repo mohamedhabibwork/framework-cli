@@ -112,10 +112,16 @@ export function renderProvider(def: ResourceDefinition, files: CrudFiles, config
   ].join('\n');
 }
 
-export function renderIndex(def: ResourceDefinition, files: CrudFiles): string {
+/** Where the generated module registers: legacy marker files, or one `defineModule` export. */
+export interface ModuleExport {
+  /** Module exporting the application's `AppConfig` type. */
+  readonly config: string;
+}
+
+export function renderIndex(def: ResourceDefinition, files: CrudFiles, moduleExport?: ModuleExport): string {
   const { pascal, camel, pluralPascal, pluralCamel, constant } = def.names;
   const from = (to: string) => importPath(files.index, to);
-  return [
+  const reexports = [
     `export type * from '${from(files.dto)}';`,
     `export { ${constant}_CONTROLLER, ${constant}_REPOSITORY, ${constant}_SERVICE, ${pluralCamel}Provider } from '${from(files.provider)}';`,
     `export { ${camel}Routes } from '${from(files.routes)}';`,
@@ -126,6 +132,27 @@ export function renderIndex(def: ResourceDefinition, files: CrudFiles): string {
     `  list${pluralPascal}QuerySchema,`,
     `  update${pascal}Schema,`,
     `} from '${from(files.schemas)}';`,
+  ];
+  if (!moduleExport) return [...reexports, ''].join('\n');
+  const segment = def.mount.split('/').at(-1) as string;
+  const name = files.moduleDir.split('/').at(-1) as string;
+  return [
+    "import { defineModule } from '@framework/http';",
+    "import type { Operation } from '@framework/openapi';",
+    `import type { AppConfig } from '${from(moduleExport.config)}';`,
+    `import { ${camel}Operations } from '${from(files.openapi)}';`,
+    `import { ${pluralCamel}Provider } from '${from(files.provider)}';`,
+    `import { ${camel}Routes } from '${from(files.routes)}';`,
+    '',
+    ...reexports,
+    '',
+    "/** The module's single registration point: listed in `defineApp({ modules })`. */",
+    `export const ${pluralCamel}Module = defineModule<AppConfig, Operation>({`,
+    `  name: '${name}',`,
+    `  providers: [${pluralCamel}Provider],`,
+    `  routes: { path: '/${segment}', app: ${camel}Routes },`,
+    `  operations: ${camel}Operations,`,
+    '});',
     '',
   ].join('\n');
 }

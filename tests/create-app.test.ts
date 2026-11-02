@@ -115,8 +115,8 @@ describe('create (app startup generator)', () => {
     async () => {
       for (const path of [
         'package.json',
-        'bootstrap/http.ts',
-        'bootstrap/providers.ts',
+        'bootstrap/app.ts',
+        'bootstrap/middleware.ts',
         'app/providers/cache.provider.ts',
         'app/providers/database.provider.ts',
         'app/providers/events.provider.ts',
@@ -132,6 +132,16 @@ describe('create (app startup generator)', () => {
         '.env.example',
       ]) {
         expect(await Bun.file(join(app, path)).exists()).toBe(true);
+      }
+      // One registration point: bootstrap/app.ts replaces the per-concern wiring files.
+      for (const path of [
+        'bootstrap/http.ts',
+        'bootstrap/providers.ts',
+        'bootstrap/openapi.ts',
+        'routes/api.ts',
+        'routes/health.ts',
+      ]) {
+        expect(await Bun.file(join(app, path)).exists()).toBe(false);
       }
 
       const typecheck = await capture(
@@ -189,7 +199,7 @@ describe('create (app startup generator)', () => {
     async () => {
       // (a) The three kit-backed providers are registered in the providers
       // file (this is also the CLI's textual capability gate).
-      const providersSource = await Bun.file(join(app, 'bootstrap/providers.ts')).text();
+      const providersSource = await Bun.file(join(app, 'bootstrap/app.ts')).text();
       for (const provider of [
         'cacheProvider',
         'loggingProvider',

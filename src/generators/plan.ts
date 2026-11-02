@@ -77,13 +77,22 @@ export async function buildChanges(
       'Review them, then re-run with --force to replace generator-owned files only.',
     );
   }
+  // Several updates may target one file (e.g. providers and modules both live
+  // in bootstrap/app.ts); they compose in order into a single change.
+  const updated = new Map<string, { readonly previous: string; readonly content: string }>();
   for (const update of updates) {
-    const handle = Bun.file(resolveInsideProject(root, update.path));
-    if (!(await handle.exists()))
-      throw failure('REGISTRATION_TARGET_MISSING', `Expected file ${update.path} does not exist`);
-    const previous = await handle.text();
-    const content = update.transform(previous);
-    if (content !== previous) changes.push({ path: update.path, action: 'update', content, previous });
+    let pending = updated.get(update.path);
+    if (pending === undefined) {
+      const handle = Bun.file(resolveInsideProject(root, update.path));
+      if (!(await handle.exists()))
+        throw failure('REGISTRATION_TARGET_MISSING', `Expected file ${update.path} does not exist`);
+      const previous = await handle.text();
+      pending = { previous, content: previous };
+    }
+    updated.set(update.path, { previous: pending.previous, content: update.transform(pending.content) });
+  }
+  for (const [path, { previous, content }] of updated) {
+    if (content !== previous) changes.push({ path, action: 'update', content, previous });
   }
   return changes;
 }

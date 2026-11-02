@@ -148,6 +148,25 @@ describe('staged file plans', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test('updates to the same file compose into one change', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'fw-plan-'));
+    try {
+      await Bun.write(join(root, 'app.ts'), 'app');
+      const changes = await buildChanges(
+        root,
+        [],
+        [
+          { path: 'app.ts', transform: (s) => `${s}+provider` },
+          { path: 'app.ts', transform: (s) => `${s}+module` },
+        ],
+        false,
+      );
+      expect(changes).toEqual([{ path: 'app.ts', action: 'update', previous: 'app', content: 'app+provider+module' }]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('verification report parsing', () => {

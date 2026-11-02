@@ -67,10 +67,7 @@ export function appTemplateFiles(input: AppTemplateInput): readonly NewFile[] {
     { path: 'drizzle.config.ts', content: drizzleConfig() },
     { path: 'config/index.ts', content: config(input) },
     { path: 'bootstrap/app.ts', content: bootstrapApp(input) },
-    { path: 'bootstrap/http.ts', content: bootstrapHttp(input) },
     { path: 'bootstrap/middleware.ts', content: bootstrapMiddleware() },
-    { path: 'bootstrap/openapi.ts', content: bootstrapOpenapi(input) },
-    { path: 'bootstrap/providers.ts', content: bootstrapProviders() },
     { path: 'app/providers/cache.provider.ts', content: cacheProvider() },
     { path: 'app/providers/database.provider.ts', content: databaseProvider() },
     { path: 'app/providers/events.provider.ts', content: eventsProvider() },
@@ -84,9 +81,7 @@ export function appTemplateFiles(input: AppTemplateInput): readonly NewFile[] {
     { path: 'app/notifications/index.ts', content: notificationsRegistry() },
     { path: 'app/listeners/index.ts', content: listenersRegistry() },
     { path: 'app/listeners/listeners.provider.ts', content: listenersProvider() },
-    { path: 'routes/api.ts', content: apiRoutes() },
     { path: 'routes/data.ts', content: dataRoutes() },
-    { path: 'routes/health.ts', content: healthRoutes() },
     { path: 'database/schema/index.ts', content: schemaIndex() },
     { path: 'database/seeders.ts', content: seeders() },
     { path: 'bin/server.ts', content: server() },
@@ -299,7 +294,8 @@ bun run cli -- make:crud Order --module orders \\\\
 
 - \`app/modules/<feature>/\` — business modules (generate with \`make:crud\`)
 - \`app/providers/\` — application providers (database, events)
-- \`bootstrap/\` — framework application, HTTP composition, middleware, OpenAPI
+- \`bootstrap/app.ts\` — the application in one place: providers, modules, health, routes, OpenAPI
+- \`bootstrap/middleware.ts\` — named middleware aliases and groups
 - \`config/\` — validated configuration (environment-mapped)
 - \`database/schema\` — canonical Drizzle tables (including \`audit_logs\`)
 - \`bin/\` — server, worker and CLI entry points
@@ -315,7 +311,7 @@ The cache (\`CACHE\`/\`LOCK_STORE\`/\`RATE_LIMITER\` via \`@framework/cache\`),
 structured logging (\`LOGGER\` via \`@framework/logging\`) and storage disks
 (\`STORAGE\` via \`@framework/storage\`) are configured by the \`cache\`,
 \`logging\` and \`storage\` sections of \`config/index.ts\` and registered in
-\`bootstrap/providers.ts\`. Three CLI commands operate them:
+\`bootstrap/app.ts\`. Three CLI commands operate them:
 
 \`\`\`sh
 bun run cli -- cache:clear --dry-run    # preview; add --confirm to execute
@@ -506,55 +502,81 @@ export function loadAppConfig(options: { envFile?: string; processEnv?: Record<s
 `;
 }
 
-function bootstrapApp({ className }: AppTemplateInput): string {
-  return `import { Application } from '@framework/core';
+function bootstrapApp({ className, apiTitle }: AppTemplateInput): string {
+  return `import { cacheHealthCheck } from '@framework/cache';
+import type { Application } from '@framework/core';
+import { auditRoutes, dataOperations } from '@framework/crud';
+import { AUDIT_READER, databaseHealthCheck } from '@framework/database';
+import { defineApp, defineModule, type FrameworkEnv, forbidden, resolve } from '@framework/http';
+import { generateOpenApiDocument, type Operation } from '@framework/openapi';
+import { queueHealthCheck } from '@framework/queue';
+import type { Context } from 'hono';
+import { listenersProvider } from '../app/listeners/listeners.provider';
+import { cacheProvider } from '../app/providers/cache.provider';
+import { dataProvider } from '../app/providers/data.provider';
+import { databaseProvider } from '../app/providers/database.provider';
+import { eventsProvider, WEBSOCKET_GATEWAY } from '../app/providers/events.provider';
+import { loggingProvider } from '../app/providers/logging.provider';
+import { mailProvider } from '../app/providers/mail.provider';
+import { notificationsProvider } from '../app/providers/notifications.provider';
+import { storageProvider } from '../app/providers/storage.provider';
 import type { AppConfig } from '../config';
-import { providers } from './providers';
+import { dataRoutes } from '../routes/data';
+import { createMiddleware } from './middleware';
 
 export type ${className}Application = Application<AppConfig>;
 
-/** Builds the framework application. Callers boot it and own its shutdown. */
-export function createApplication(config: AppConfig): ${className}Application {
-  return new Application<AppConfig>({ config, providers });
-}
-`;
-}
-
-function bootstrapHttp({ className }: AppTemplateInput): string {
-  return `import { auditRoutes } from '@framework/crud';
-import { AUDIT_READER } from '@framework/database';
-import { assertNoDuplicateRoutes, createHttpKernel, type FrameworkEnv, forbidden, resolve } from '@framework/http';
-import type { Context } from 'hono';
-import { WEBSOCKET_GATEWAY } from '../app/providers/events.provider';
-import { apiRoutes } from '../routes/api';
-import { healthRoutes } from '../routes/health';
-import type { ${className}Application } from './app';
-import { createMiddleware } from './middleware';
+/** Queued import/export endpoints under /api/v1/data (see \`routes/data.ts\`). */
+const dataModule = defineModule<AppConfig, Operation>({
+  name: 'data',
+  routes: { path: '/data', app: dataRoutes },
+  operations: dataOperations({ mount: '/api/v1/data' }),
+});
 
 /**
- * Composes the typed Hono application. The kernel owns the fixed outer order:
- * request id -> body limit -> request scope -> secure headers (strict preset,
- * \`http.secureHeaders\`) -> CORS (\`http.corsOrigins\`, off when empty) ->
- * module routes. The \`api\` middleware group adds the shared throttle.
+ * The application, registered in one place. Generators add providers and
+ * modules below their markers; list order does not matter (boot order comes
+ * from each provider's \`dependsOn\` / \`provides\` / \`requires\`).
  *
- * Audit endpoints (\`/audit\`) read the framework-owned audit trail; they are
- * denied in production until an identity/authorization layer exists. The
- * \`/ws\` gateway opens private \`user.<id>\` channels for authenticated
- * actors and broadcasts presence.
+ * The kernel owns the fixed outer order: request id -> body limit -> request
+ * scope -> secure headers (\`http.secureHeaders\`) -> CORS (\`http.corsOrigins\`,
+ * off when empty). The \`api\` middleware group (shared throttle) then wraps
+ * \`/health\`, every module under \`/api/v1\`, and the app routes.
+ *
+ * Audit endpoints (\`/audit\`) are denied in production until an
+ * identity/authorization layer exists. The \`/ws\` gateway opens private
+ * \`user.<id>\` channels for authenticated actors and broadcasts presence.
+ * Replace any binding with \`overrides: (container) => container.override(…)\`.
  */
-export function createHttp(application: ${className}Application) {
-  const { config } = application;
-  const http = createHttpKernel(application, {
+export const app = defineApp<AppConfig, Operation>({
+  http: (config) => ({
     exposeInternalErrors: config.app.debug && config.app.env !== 'production',
     maxBodyBytes: config.http.maxBodyBytes,
     secureHeaders: config.http.secureHeaders,
     cors: { origins: config.http.corsOrigins },
     report: (error, context) => console.error('[http] unhandled error', context, error),
-  })
-    .use(...createMiddleware(config).resolve(['api']))
-    .route('/health', healthRoutes)
-    .route('/api/v1', apiRoutes)
-    .route(
+  }),
+  middleware: (config) => createMiddleware(config).resolve(['api']),
+  providers: [
+    cacheProvider,
+    loggingProvider,
+    storageProvider,
+    databaseProvider,
+    eventsProvider,
+    listenersProvider,
+    dataProvider,
+    mailProvider,
+    notificationsProvider,
+    // @framework:providers
+  ],
+  modules: [
+    dataModule,
+    // @framework:modules
+  ],
+  health: { checks: [databaseHealthCheck(), cacheHealthCheck(), queueHealthCheck()] },
+  routes: (http, { config, container }) => {
+    // @framework:app-routes
+    http.route(
       '/audit',
       auditRoutes({
         authorize: (_c: Context<FrameworkEnv>) => {
@@ -562,15 +584,29 @@ export function createHttp(application: ${className}Application) {
         },
         reader: (c: Context<FrameworkEnv>) => resolve(c, AUDIT_READER),
       }),
-    )
-    .route('/ws', application.container.resolve(WEBSOCKET_GATEWAY).routes());
+    );
+    http.route('/ws', container.resolve(WEBSOCKET_GATEWAY).routes());
+  },
+});
 
-  assertNoDuplicateRoutes(http);
-  return http;
+/** Builds the framework application with overrides applied. Callers boot it and own its shutdown. */
+export const createApplication = (config: AppConfig): ${className}Application => app.createApplication(config);
+
+/**
+ * The HTTP app. Hono RPC clients type against a module's routes, e.g.
+ * \`hc<typeof productRoutes>('/api/v1/products')\`.
+ */
+export const createHttp = (application: ${className}Application) => app.createHttp(application);
+
+/** Session auth is a cookie; API clients authenticate with Bearer tokens. */
+const securitySchemes = {
+  sessionCookie: { type: 'apiKey', in: 'cookie', name: 'fw_session' },
+  bearerAuth: { type: 'http', scheme: 'bearer' },
+} as const;
+
+export function buildOpenApiDocument(version = '1.0.0') {
+  return generateOpenApiDocument({ title: '${apiTitle}', version, operations: app.operations, securitySchemes });
 }
-
-/** Route types for Hono RPC clients (\`hc<AppType>()\`). */
-export type AppType = ReturnType<typeof createHttp>;
 `;
 }
 
@@ -608,61 +644,6 @@ export function createMiddleware(config: AppConfig): MiddlewareRegistry {
       .group('api', ['throttle'])
   );
 }
-`;
-}
-
-function bootstrapOpenapi({ apiTitle }: AppTemplateInput): string {
-  return `import { dataOperations } from '@framework/crud';
-import { generateOpenApiDocument, type Operation } from '@framework/openapi';
-
-/** Documented API operations. Generators append module operation lists below the marker. */
-export const operations: readonly Operation[] = [
-  // @framework:openapi-operations
-  ...dataOperations({ mount: '/api/v1/data' }),
-];
-
-/** Session auth is a cookie; API clients authenticate with Bearer tokens. */
-const securitySchemes = {
-  sessionCookie: { type: 'apiKey', in: 'cookie', name: 'fw_session' },
-  bearerAuth: { type: 'http', scheme: 'bearer' },
-} as const;
-
-export function buildOpenApiDocument(version = '1.0.0') {
-  return generateOpenApiDocument({ title: '${apiTitle}', version, operations, securitySchemes });
-}
-`;
-}
-
-function bootstrapProviders(): string {
-  return `import type { ServiceProvider } from '@framework/core';
-import { listenersProvider } from '../app/listeners/listeners.provider';
-import { cacheProvider } from '../app/providers/cache.provider';
-import { dataProvider } from '../app/providers/data.provider';
-import { databaseProvider } from '../app/providers/database.provider';
-import { eventsProvider } from '../app/providers/events.provider';
-import { loggingProvider } from '../app/providers/logging.provider';
-import { mailProvider } from '../app/providers/mail.provider';
-import { notificationsProvider } from '../app/providers/notifications.provider';
-import { storageProvider } from '../app/providers/storage.provider';
-import type { AppConfig } from '../config';
-
-/**
- * Explicit provider registration. List order does not matter: boot order is
- * resolved from \`dependsOn\` and the tokens each provider \`provides\` /
- * \`requires\` / uses (\`optional\`).
- */
-export const providers: readonly ServiceProvider<AppConfig>[] = [
-  cacheProvider,
-  loggingProvider,
-  storageProvider,
-  databaseProvider,
-  eventsProvider,
-  listenersProvider,
-  dataProvider,
-  mailProvider,
-  notificationsProvider,
-  // @framework:providers
-];
 `;
 }
 
@@ -846,7 +827,7 @@ import { DATA_PORTER, EXPORT_STORE } from './data.tokens';
  * the local export artifact store, and the dispatcher behind \`/api/v1/data\`.
  * To opt a module in: define its import/export jobs with \`defineImportJob\`
  * /\`defineExportJob\` (pass \`storeToken: EXPORT_STORE\`), list them below,
- * and add the resource name to \`dataOperations\` in \`bootstrap/openapi.ts\`.
+ * and add the resource name to \`dataOperations\` in \`bootstrap/app.ts\`.
  */
 export const dataProvider = defineProvider<AppConfig>({
   name: 'data',
@@ -978,18 +959,6 @@ export const listenersProvider = defineProvider<AppConfig>({
 `;
 }
 
-function apiRoutes(): string {
-  return `import type { FrameworkEnv } from '@framework/http';
-import { Hono } from 'hono';
-import { dataRoutes } from './data';
-
-/** Versioned API composed from module routes; mounted at /api/v1. */
-export const apiRoutes = new Hono<FrameworkEnv>()
-  // @framework:routes
-  .route('/data', dataRoutes);
-`;
-}
-
 function dataRoutes(): string {
   return `import { EXECUTION_CONTEXT } from '@framework/core';
 import { importExportRoutes } from '@framework/crud';
@@ -1000,8 +969,8 @@ import { loadAppConfig } from '../config';
 // Loaded once; the authorization guard reads the validated env from it.
 const configPromise = loadAppConfig();
 /**
- * Queued import/export endpoints (documented via \`dataOperations\` in
- * \`bootstrap/openapi.ts\`):
+ * Queued import/export endpoints (registered and documented as the \`data\`
+ * module in \`bootstrap/app.ts\`):
  *
  * \`\`\`text
  * POST /api/v1/data/import                 dispatch an import (CSV/JSON)
@@ -1022,19 +991,6 @@ export const dataRoutes = importExportRoutes({
     const config = await configPromise;
     if (config.app.env === 'production') throw forbidden('Import/export endpoints require authorization');
   },
-});
-`;
-}
-
-function healthRoutes(): string {
-  return `import { cacheHealthCheck } from '@framework/cache';
-import { databaseHealthCheck } from '@framework/database';
-import { healthRoutes as frameworkHealthRoutes } from '@framework/http';
-import { queueHealthCheck } from '@framework/queue';
-
-/** Liveness never touches dependencies; readiness probes the database, cache and queue (2s each). */
-export const healthRoutes = frameworkHealthRoutes({
-  checks: [databaseHealthCheck(), cacheHealthCheck(), queueHealthCheck()],
 });
 `;
 }
@@ -1070,25 +1026,22 @@ export const seeders = [
 }
 
 function server(): string {
-  return `import { installGracefulShutdown, redact } from '@framework/core';
-import { websocket } from '@framework/events';
-import { createApplication } from '../bootstrap/app';
-import { createHttp } from '../bootstrap/http';
+  return `import { websocket } from '@framework/events';
+import { runServer } from '@framework/http';
+import { createApplication, createHttp } from '../bootstrap/app';
 import { loadAppConfig } from '../config';
 
 const config = await loadAppConfig();
 const application = await createApplication(config).boot();
-const http = createHttp(application);
 
-const server = Bun.serve({ hostname: config.http.host, port: config.http.port, fetch: http.fetch, websocket });
-console.error(\`[server] listening on http://\${server.hostname}:\${server.port}\`, redact({ app: config.app }));
-
-installGracefulShutdown({
-  timeoutMs: config.http.shutdownTimeoutMs,
-  onShutdown: async () => {
-    await server.stop();
-    await application.shutdown();
-  },
+// Drains in-flight requests on SIGTERM/SIGINT, then shuts the application down.
+await runServer({
+  application,
+  fetch: createHttp(application).fetch,
+  hostname: config.http.host,
+  port: config.http.port,
+  websocket,
+  shutdownTimeoutMs: config.http.shutdownTimeoutMs,
 });
 `;
 }
@@ -1129,11 +1082,8 @@ import { MemoryCache, RedisCache } from '@framework/cache';
 import { defineProject, frameworkCommands, runCli } from '@framework/cli';
 import { createConnection, type DatabaseConnection } from '@framework/database';
 import { listRoutes } from '@framework/http';
-import { createApplication } from '../bootstrap/app';
-import { createHttp } from '../bootstrap/http';
+import { app, buildOpenApiDocument, createApplication, createHttp } from '../bootstrap/app';
 import { createMiddleware } from '../bootstrap/middleware';
-import { buildOpenApiDocument, operations } from '../bootstrap/openapi';
-import { providers } from '../bootstrap/providers';
 import { type AppConfig, loadAppConfig } from '../config';
 
 const root = join(import.meta.dir, '..');
@@ -1210,10 +1160,9 @@ export const project = defineProject({
     schemaIndex: 'database/schema/index.ts',
     factories: 'database/factories',
     migrations: 'database/migrations',
-    apiRoutes: 'routes/api.ts',
-    providers: 'bootstrap/providers.ts',
+    app: 'bootstrap/app.ts',
+    providers: 'bootstrap/app.ts',
     middleware: 'bootstrap/middleware.ts',
-    openapi: 'bootstrap/openapi.ts',
     config: 'config/index.ts',
     testSupport: 'tests/support.ts',
   },
@@ -1246,10 +1195,10 @@ export const project = defineProject({
       await booted.shutdown();
     }
   },
-  providers: () => providers.map((provider) => provider.name),
+  providers: () => app.providers.map((provider) => provider.name),
   seeders: async () => (await import('../database/seeders')).seeders,
   middleware: () => middleware.describe(),
-  openapi: () => ({ operations, build: buildOpenApiDocument }),
+  openapi: () => ({ operations: app.operations, build: buildOpenApiDocument }),
 });
 
 if (import.meta.main) {
@@ -1268,10 +1217,10 @@ function testSupport({ className }: AppTemplateInput): string {
   // `createApplication` varies per app; compute it instead of hard-coding one
   // order (which is wrong for roughly half of all names).
   const applicationType = `${className}Application`;
-  const applicationImport =
-    compareImportNames(applicationType, 'createApplication') < 0
-      ? `import { type ${applicationType}, createApplication } from '../bootstrap/app';`
-      : `import { createApplication, type ${applicationType} } from '../bootstrap/app';`;
+  const applicationNames = [applicationType, 'createApplication', 'createHttp']
+    .sort(compareImportNames)
+    .map((name) => (name === applicationType ? `type ${name}` : name));
+  const applicationImport = `import { ${applicationNames.join(', ')} } from '../bootstrap/app';`;
   return `import { join } from 'node:path';
 import { parseConfig } from '@framework/core';
 import {
@@ -1281,7 +1230,6 @@ import {
   serveOnEphemeralPort,
 } from '@framework/testing';
 ${applicationImport}
-import { createHttp } from '../bootstrap/http';
 import { configSchema, mapEnvironment } from '../config';
 
 const APP_ROOT = join(import.meta.dir, '..');
@@ -1351,8 +1299,7 @@ export async function createTestContext(): Promise<TestContext> {
 function healthTest(): string {
   return `import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { parseConfig } from '@framework/core';
-import { createApplication } from '../bootstrap/app';
-import { createHttp } from '../bootstrap/http';
+import { createApplication, createHttp } from '../bootstrap/app';
 import { configSchema, mapEnvironment } from '../config';
 
 /**
