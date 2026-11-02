@@ -255,6 +255,23 @@ function moduleRegistration(app: string, def: ResourceDefinition, files: CrudFil
   };
 }
 
+/**
+ * With `defineApp` a mount path lives where its module is defined: a generated
+ * module's index, or the app file itself (hand-written modules and `http.route`).
+ */
+async function assertMountFree(context: CommandContext, app: string, def: ResourceDefinition, files: CrudFiles) {
+  const segment = def.mount.split('/').at(-1) as string;
+  // Scanned from the root: a new app has no modules directory yet.
+  const scan = new Bun.Glob(`${context.project.paths.modules}/*/index.ts`).scan({ cwd: context.root });
+  const indexes = await Array.fromAsync(scan);
+  for (const path of [app, ...indexes.filter((index) => index !== files.index)]) {
+    const source = await Bun.file(resolveInsideProject(context.root, path)).text();
+    if (source.includes(`path: '/${segment}'`) || source.includes(`.route('${def.mount}'`)) {
+      throw usageError(`Route collision: ${def.mount} is already mounted in ${path}`);
+    }
+  }
+}
+
 /** The legacy registration paths a project must declare when it has no `defineApp` module. */
 function legacyPaths(context: CommandContext): { readonly apiRoutes: string; readonly openapi: string } {
   const { apiRoutes, openapi } = context.project.paths;
@@ -328,6 +345,8 @@ export async function planCrud(context: CommandContext, def: ResourceDefinition,
       'Choose another --module, or --force to regenerate its generator-owned files.',
     );
   }
+  const { app } = context.project.paths;
+  if (app !== undefined) await assertMountFree(context, app, def, files);
   const changes = await buildChanges(
     context.root,
     renderFiles(context, def, files),

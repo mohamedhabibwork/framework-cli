@@ -48,7 +48,7 @@ const UNRELATED = [
   'database/schema/products.ts',
   'database/migrations/0000_create-products.sql',
   'config/index.ts',
-  'bootstrap/http.ts',
+  'bootstrap/middleware.ts',
 ];
 
 beforeAll(async () => {

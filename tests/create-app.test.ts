@@ -421,6 +421,32 @@ describe('create --with-demo (one-command full generation)', () => {
         expect(paths).toContain(expected);
       }
 
+      // The data module is defined in bootstrap/app.ts, not under app/modules.
+      const collision = await capture(
+        Bun.spawn(
+          [
+            'bun',
+            'run',
+            'cli',
+            '--',
+            'make:crud',
+            'Shelf',
+            '--module',
+            'shelves',
+            '--route',
+            '/api/v1/data',
+            '--fields',
+            'name:text:required',
+            '--access',
+            'public',
+            '--dry-run',
+          ],
+          { cwd: app, env: childEnv(), stdout: 'pipe', stderr: 'pipe' },
+        ),
+      );
+      expect(collision.code).toBe(2);
+      expect(collision.stderr).toContain('Route collision');
+
       const openapi = await capture(
         Bun.spawn(['bun', 'run', 'cli', '--', 'openapi:generate', '--output', 'docs/openapi.json'], {
           cwd: app,
