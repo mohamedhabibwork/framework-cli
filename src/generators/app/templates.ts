@@ -479,7 +479,8 @@ const api = apiPreset<AppConfig>({
  * The kernel owns the fixed outer order: request id -> body limit -> request
  * scope -> secure headers (\`http.secureHeaders\`) -> CORS (\`http.corsOrigins\`,
  * off when empty). The \`api\` middleware group (shared throttle) then wraps
- * \`/health\`, every module under \`/api/v1\`, and the app routes.
+ * every module under \`/api/v1\` and the app routes; \`/health\` stays outside
+ * it so the probes still answer during a Redis outage.
  *
  * Audit endpoints (\`/audit\`) are denied in production until an
  * identity/authorization layer exists. The \`/ws\` gateway opens private
@@ -780,6 +781,10 @@ export async function createTestContext(): Promise<TestContext> {
       APP_DEBUG: 'false',
       DATABASE_URL: database.url,
       DATABASE_MAX_CONNECTIONS: '4',
+      // Cache, locks and rate limits stay in-process, isolated per context.
+      CACHE_DRIVER: 'memory',
+      // The explicit env above hides .env.test; queues need the Redis it names.
+      REDIS_URL: process.env.REDIS_URL,
       // Suites issue many rapid requests from one client; the coarse
       // api-group ceiling is production behavior, not a test subject here.
       HTTP_THROTTLE_ENABLED: 'false',
@@ -831,6 +836,8 @@ beforeAll(async () => {
     APP_DEBUG: 'false',
     // Never connected: /health/live does not touch the database.
     DATABASE_URL: 'postgres://app:unused@127.0.0.1:1/unused',
+    // Routes behind the throttle must not need a running Redis.
+    CACHE_DRIVER: 'memory',
   });
   application = await createApplication(config).boot();
   http = createHttp(application);
