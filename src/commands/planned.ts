@@ -22,7 +22,6 @@ const PLANNED: readonly [string, CommandGroup, string][] = [
   ['observatory:list', 'observatory', 'List recent observatory entries'],
   ['observatory:prune', 'observatory', 'Prune observatory entries older than a date'],
   ['observatory:clear', 'observatory', 'Clear all observatory entries'],
-  ['socialite:providers', 'socialite', 'List configured social login providers'],
 ];
 
 export const plannedCommands: Command[] = PLANNED.map(([name, group, description]) =>

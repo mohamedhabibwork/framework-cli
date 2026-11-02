@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { socialProviders } from '../src/commands/project';
 import { mkdir, mkdtemp, readlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -276,6 +277,31 @@ interface Envelope {
   data: unknown;
   error?: { code: string; message: string };
 }
+
+describe('socialite:providers', () => {
+  test('lists names and redirects, never secrets', () => {
+    const providers = socialProviders({
+      socialite: {
+        providers: { google: { clientId: 'id', clientSecret: 'super-secret' }, apple: { clientId: 'x' } },
+        redirects: { google: 'https://app/cb' },
+      },
+    });
+
+    expect(providers).toEqual([
+      { provider: 'google', redirect: 'https://app/cb' },
+      { provider: 'apple', redirect: null },
+    ]);
+    expect(JSON.stringify(providers)).not.toContain('super-secret');
+    expect(socialProviders({})).toEqual([]);
+  });
+
+  test('runs against an app without the section', async () => {
+    const result = await cli(['--json', 'socialite:providers']);
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout).data.providers).toEqual([]);
+  });
+});
 
 describe('infrastructure command gating (process contract)', () => {
   test('the three commands moved from planned to implemented in the catalog', async () => {

@@ -47,7 +47,28 @@ const hostPortOptions = [
 
 export { loadConfigOrFail };
 
+/** Provider names and redirects only, because a provider's section holds its secrets. */
+export function socialProviders(config: unknown): readonly { provider: string; redirect: string | null }[] {
+  const section = (config as { socialite?: { providers?: object; redirects?: Record<string, string> } }).socialite;
+  return Object.keys(section?.providers ?? {}).map((provider) => ({
+    provider,
+    redirect: section?.redirects?.[provider] ?? null,
+  }));
+}
+
 export const projectCommands = [
+  defineCommand({
+    name: 'socialite:providers',
+    group: 'socialite',
+    status: 'implemented',
+    description: 'List configured social login providers',
+    async run(_input, context) {
+      const providers = socialProviders(await loadConfigOrFail(context));
+      for (const { provider, redirect } of providers) context.print(`${provider}  ${redirect ?? '(no redirect)'}`);
+      if (providers.length === 0) context.print('No social login providers are configured.');
+      return { data: { providers } };
+    },
+  }),
   defineCommand({
     name: 'help',
     group: 'project',
