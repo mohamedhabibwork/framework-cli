@@ -89,6 +89,32 @@ const positiveNumber = (value: string | undefined, name: string, fallback: numbe
 
 export const projectCommands = [
   defineCommand({
+    name: 'permission:sync',
+    group: 'project',
+    status: 'implemented',
+    description: 'Make the database roles hold exactly the permissions in config (--confirm required)',
+    options: [{ name: 'confirm', type: 'boolean', description: 'Confirm changing role permissions' }],
+    async run({ options }, context) {
+      if (!flag(options, 'confirm')) {
+        throw usageError('"permission:sync" can remove permissions from live roles; pass --confirm');
+      }
+      if (!context.project.authorization) {
+        throw unsupported(
+          '"permission:sync" needs access to the role store',
+          'Add an `authorization(config)` hook to this project CLI adapter, or install @framework/authorization.',
+        );
+      }
+      const handle = await context.project.authorization(await loadConfigOrFail(context));
+      try {
+        const result = await handle.sync();
+        context.print(`Synced ${result.roles} role(s): ${result.added} added, ${result.removed} removed.`);
+        return { data: result };
+      } finally {
+        await handle.close();
+      }
+    },
+  }),
+  defineCommand({
     name: 'observatory:list',
     group: 'observatory',
     status: 'implemented',

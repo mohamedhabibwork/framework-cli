@@ -9,6 +9,7 @@ import {
   renderApiTest,
   renderEvent,
   renderListener,
+  renderAbility,
   renderMiddleware,
   renderProvider,
   renderUnitTest,
@@ -181,6 +182,20 @@ export const scaffoldGeneratorCommands = [
     // table/schema/soft-delete slice options would be silent no-ops here.
     [],
   ),
+  defineCommand({
+    name: 'make:ability',
+    group: 'generators',
+    status: 'implemented',
+    description: 'Subject-level authorization rule for @framework/authorization',
+    arguments: [{ name: 'name', description: 'Ability name in PascalCase or kebab-case', required: true }],
+    options: COMMON_OPTIONS,
+    examples: ['make:ability EditPost', 'make:ability edit-post --dry-run'],
+    async run({ positionals, options }, context) {
+      const id = names(positionals[0], 'Ability');
+      const files = [{ path: join('app/abilities', `${id.kebab}.ability.ts`), content: renderAbility(id) }];
+      return generate(context, options, files, []);
+    },
+  }),
   defineCommand({
     name: 'make:middleware',
     group: 'generators',

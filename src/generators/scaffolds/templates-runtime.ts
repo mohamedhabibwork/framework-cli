@@ -15,6 +15,21 @@ export function splitEventName(kebab: string): { readonly channel: string; reado
   return { channel: parts.slice(0, -1).join('-'), verb: parts.at(-1) as string };
 }
 
+export function renderAbility(id: Identifiers): string {
+  return `import { defineAbility } from '@framework/authorization';
+
+/** Who may act on a ${id.pascal}. Check it with \`gate.can(principal, can${id.pascal}, subject)\`. */
+export const can${id.pascal} = defineAbility<${id.pascal}Subject>('${id.kebab}', ({ actor, subject }) => {
+  // Everything is denied until this returns true.
+  return subject.ownerId === actor.id;
+});
+
+export interface ${id.pascal}Subject {
+  readonly ownerId: string;
+}
+`;
+}
+
 export function renderMiddleware(id: Identifiers): string {
   return `import type { FrameworkEnv } from '@framework/http';
 import type { MiddlewareHandler } from 'hono';

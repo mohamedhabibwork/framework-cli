@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Command, CommandContext } from '../src/command';
 import { projectCommands, socialProviders } from '../src/commands/project';
-import type { ObservatoryHandle } from '../src/project';
+import { renderAbility } from '../src/generators/scaffolds/templates-runtime';
+import type { AuthorizationHandle, ObservatoryHandle } from '../src/project';
 import { mkdir, mkdtemp, readlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -279,6 +280,56 @@ interface Envelope {
   data: unknown;
   error?: { code: string; message: string };
 }
+
+describe('permission:sync', () => {
+  const sync = projectCommands.find((candidate) => candidate.name === 'permission:sync') as Command;
+  const input = (options: Record<string, unknown>) => ({ positionals: [], options }) as never;
+  const contextFor = (authorization?: () => Promise<AuthorizationHandle>) =>
+    ({
+      print: () => {},
+      project: { loadConfig: async () => ({}), ...(authorization ? { authorization } : {}) },
+    }) as unknown as CommandContext;
+
+  test('needs --confirm, and closes the store', async () => {
+    let closed = 0;
+    const handle: AuthorizationHandle = {
+      sync: async () => ({ roles: 1, added: 2, removed: 3 }),
+      close: async () => {
+        closed += 1;
+      },
+    };
+
+    await expect(
+      sync.run(
+        input({}),
+        contextFor(async () => handle),
+      ),
+    ).rejects.toThrow('--confirm');
+    expect(closed).toBe(0);
+    expect(
+      await sync.run(
+        input({ confirm: true }),
+        contextFor(async () => handle),
+      ),
+    ).toMatchObject({
+      data: { removed: 3 },
+    });
+    expect(closed).toBe(1);
+  });
+
+  test('needs the project hook', async () => {
+    await expect(sync.run(input({ confirm: true }), contextFor())).rejects.toThrow('role store');
+  });
+});
+
+describe('make:ability', () => {
+  test('renders a deny-by-default rule', () => {
+    const content = renderAbility({ pascal: 'EditPost', kebab: 'edit-post' } as never);
+
+    expect(content).toContain("defineAbility<EditPostSubject>('edit-post'");
+    expect(content).toContain('canEditPost');
+  });
+});
 
 describe('observatory commands', () => {
   const command = (name: string) => projectCommands.find((candidate) => candidate.name === name) as Command;

@@ -77,6 +77,13 @@ export interface SessionPruneHandle {
   close(): Promise<void>;
 }
 
+/** The role store, for `permission:sync`. */
+export interface AuthorizationHandle {
+  /** Makes each role in config hold exactly its listed permissions. */
+  sync(): Promise<{ readonly roles: number; readonly added: number; readonly removed: number }>;
+  close(): Promise<void>;
+}
+
 /** One observatory entry, as `observatory:list` prints it. */
 export interface ObservatoryEntryRow {
   readonly watcher: string;
@@ -117,6 +124,8 @@ export interface ProjectAdapter {
   cache?(config: unknown): Promise<CacheClearHandle>;
   /** Opens the session store for `session:prune`; omitting it disables execution (exit 3). */
   sessions?(config: unknown): Promise<SessionPruneHandle>;
+  /** Opens the role store for `permission:sync`; omitting it disables execution (exit 3). */
+  authorization?(config: unknown): Promise<AuthorizationHandle>;
   /** Opens the observatory store for `observatory:*`; omitting it disables execution (exit 3). */
   observatory?(config: unknown): Promise<ObservatoryHandle>;
   /** Registered seeders for `db:seed`; omitting it disables execution (exit 3). */
