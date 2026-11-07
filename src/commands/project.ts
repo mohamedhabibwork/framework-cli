@@ -2,7 +2,7 @@ import { redact } from '@framework/core';
 import { createConnection, pingDatabase } from '@framework/database';
 import { flag, stringOption } from '../args';
 import { type CommandContext, defineCommand } from '../command';
-import { failure, unsupported, usageError } from '../errors';
+import { CliError, failure, unsupported, usageError } from '../errors';
 import { table } from '../output';
 import type { ObservatoryHandle } from '../project';
 import { helpText } from '../run';
@@ -11,6 +11,7 @@ async function loadConfigOrFail(context: CommandContext): Promise<unknown> {
   try {
     return await context.project.loadConfig(context.envFile);
   } catch (error) {
+    if (error instanceof CliError) throw error;
     throw failure('CONFIG_INVALID', error instanceof Error ? error.message : 'Invalid configuration', undefined, error);
   }
 }

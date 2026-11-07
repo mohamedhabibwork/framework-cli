@@ -2,7 +2,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { defineCommand } from '../command';
 import { usageError } from '../errors';
-import { type AppTemplateInput, appTemplateFiles } from '../generators/app/templates';
+import { type AppTemplateInput, appTemplateFiles, standaloneCiWorkflow } from '../generators/app/templates';
 import { applyChanges, buildChanges, describeChanges, type NewFile } from '../generators/plan';
 
 const APP_NAME = /^[a-z][a-z0-9-]*$/;
@@ -20,7 +20,7 @@ function templateInput(directory: string): AppTemplateInput {
   if (!APP_NAME.test(name)) {
     throw usageError(
       `Application name "${name}" must be kebab-case (letters, digits, dashes)`,
-      'Example: bun run cli -- create apps/inventory-api',
+      'Example: bunx @framework/cli create inventory-api',
     );
   }
   return { name, className: pascalCase(name), apiTitle: `${pascalCase(name)} API` };
@@ -43,9 +43,9 @@ async function frameworkWorkspaceRoot(target: string): Promise<string | null> {
 }
 
 /**
- * Rewrites `@framework/<pkg>: "workspace:*"` to `"github:mohamedhabibwork/framework-<pkg>"`
- * and includes `@types/bun` in `devDependencies` when generating a standalone application
- * outside the framework monorepo.
+ * Rewrites `@framework/<pkg>: "workspace:*"` to `"github:mohamedhabibwork/framework-<pkg>#standalone"`
+ * and includes standalone metadata and `@types/bun`, `oxfmt`, `oxlint` in `devDependencies`
+ * when generating a standalone application outside the framework monorepo.
  */
 export function toStandalonePackageJson(source: string): string {
   const rewritten = source.replaceAll(
@@ -53,6 +53,15 @@ export function toStandalonePackageJson(source: string): string {
     '"@framework/$1": "github:mohamedhabibwork/framework-$1#standalone"',
   );
   const pkg = JSON.parse(rewritten) as {
+    name?: string;
+    version?: string;
+    private?: boolean;
+    description?: string;
+    homepage?: string;
+    bugs?: { url: string };
+    type?: string;
+    scripts?: Record<string, string>;
+    dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
     [key: string]: unknown;
   };
@@ -62,8 +71,19 @@ export function toStandalonePackageJson(source: string): string {
     oxlint: '1.90.0',
     ...(pkg.devDependencies ?? {}),
   };
-  pkg.devDependencies = Object.fromEntries(Object.entries(devDeps).sort(([a], [b]) => a.localeCompare(b)));
-  return `${JSON.stringify(pkg, null, 2)}\n`;
+  const enriched: Record<string, unknown> = {
+    name: pkg.name,
+    version: pkg.version ?? '0.2.0',
+    private: pkg.private ?? true,
+    description: pkg.description ?? 'Starter API application built on mohamedhabibwork/framework',
+    homepage: pkg.homepage ?? 'https://github.com/mohamedhabibwork/framework',
+    bugs: pkg.bugs ?? {
+      url: 'https://github.com/mohamedhabibwork/framework/issues',
+    },
+    ...pkg,
+    devDependencies: Object.fromEntries(Object.entries(devDeps).sort(([a], [b]) => a.localeCompare(b))),
+  };
+  return `${JSON.stringify(enriched, null, 2)}\n`;
 }
 
 /**
@@ -81,7 +101,22 @@ async function runInstall(cwd: string, context: { log(line: string): void }): Pr
   if (code !== 0) throw new Error(`bun install exited with code ${code}`);
 }
 
-interface DemoResult {
+async function initGitRepository(cwd: string, context: { log(line: string): void }): Promise<boolean> {
+  try {
+    const child = Bun.spawn(['git', 'init', '-b', 'main'], { cwd, stdout: 'pipe', stderr: 'pipe' });
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    for (const line of `${out}${err}`.split('\n').filter(Boolean)) context.log(line);
+    return code === 0;
+  } catch {
+    return false;
+  }
+}
+
+interface SubGeneratorResult {
   readonly ok: boolean;
   readonly detail: string;
 }
@@ -91,7 +126,7 @@ interface DemoResult {
  * duplication) to add a sample products module plus its migration. Pure file
  * generation: no database connection is needed.
  */
-async function generateDemoModule(target: string, context: { log(line: string): void }): Promise<DemoResult> {
+async function generateDemoModule(target: string, context: { log(line: string): void }): Promise<SubGeneratorResult> {
   const child = Bun.spawn(
     [
       'bun',
@@ -121,14 +156,42 @@ async function generateDemoModule(target: string, context: { log(line: string): 
   return { ok: true, detail: 'sample module "products" generated with migration' };
 }
 
+/**
+ * Runs the generated app's own `make:auth` to scaffold session + personal API
+ * token authentication and its migration.
+ */
+async function generateAuthModule(target: string, context: { log(line: string): void }): Promise<SubGeneratorResult> {
+  const child = Bun.spawn(['bun', 'run', 'bin/cli.ts', 'make:auth'], {
+    cwd: target,
+    env: { ...process.env },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  for (const line of stdout.split('\n').filter(Boolean)) context.log(`  ${line}`);
+  if (code !== 0) {
+    for (const line of stderr.split('\n').filter(Boolean)) context.log(`  ${line}`);
+    return { ok: false, detail: `make:auth exited with code ${code}` };
+  }
+  return { ok: true, detail: 'auth module (session + api-token) generated with migration' };
+}
+
 export const createCommands = [
   defineCommand({
     name: 'create',
     group: 'project',
     status: 'implemented',
-    description: 'Generate a new application into an empty directory',
+    description: 'Generate a new application from the starter template into an empty directory',
     arguments: [
-      { name: 'directory', description: 'Target directory (created if missing, must be empty)', required: true },
+      {
+        name: 'directory',
+        description: 'Target directory (created if missing, must be empty; prompted when interactive)',
+        required: false,
+      },
     ],
     options: [
       {
@@ -158,17 +221,59 @@ export const createCommands = [
         type: 'boolean',
         description: 'Also generate a sample products module (with migration) via make:crud',
       },
+      {
+        name: 'with-auth',
+        type: 'boolean',
+        description: 'Also install session + personal API token authentication via make:auth',
+      },
+      {
+        name: 'git',
+        type: 'boolean',
+        description: 'Initialize a fresh git repository in the target directory',
+      },
+      {
+        name: 'no-git',
+        type: 'boolean',
+        description: 'Skip git repository initialization',
+      },
+      {
+        name: 'dry-run',
+        type: 'boolean',
+        description: 'Preview generated files and setup steps without writing to disk',
+      },
     ],
     examples: [
+      'bunx @framework/cli create my-api --with-demo',
+      'bunx @framework/cli create my-api --with-demo --with-auth',
       'bun run cli -- create apps/inventory-api --with-demo',
-      'bun run cli -- create apps/inventory-api',
       'bun run cli -- create ../my-app --no-install',
     ],
     async run({ positionals, options }, context) {
-      const directory = positionals[0];
-      if (!directory) throw usageError('create requires a target directory');
+      if (options.git === true && options['no-git'] === true) {
+        throw usageError('Use either --git or --no-git, not both');
+      }
+
+      const rawDir = positionals[0]?.trim();
+      const directory =
+        rawDir && rawDir.length > 0
+          ? rawDir
+          : await (async () => {
+              if (!context.prompts) {
+                throw usageError(
+                  'create requires a target directory',
+                  'Example: bunx @framework/cli create my-api --with-demo',
+                );
+              }
+              return (
+                await context.prompts.text({
+                  message: 'Application directory',
+                  validate: (value) => (value.trim().length > 0 ? null : 'Target directory is required'),
+                })
+              ).trim();
+            })();
+
       const input = templateInput(directory);
-      const target = resolve(process.cwd(), directory);
+      const target = resolve(context.root, directory);
 
       const existing = await stat(target).catch(() => null);
       if (existing && !existing.isDirectory()) {
@@ -182,12 +287,54 @@ export const createCommands = [
       }
 
       const workspace = await frameworkWorkspaceRoot(target);
-      const files: readonly NewFile[] = appTemplateFiles(input).map((file) =>
-        file.path === 'package.json' && !workspace
+      const standalone = !workspace;
+      const baseFiles = appTemplateFiles(input).map((file) =>
+        file.path === 'package.json' && standalone
           ? { path: file.path, content: toStandalonePackageJson(file.content) }
           : file,
       );
+      const envExampleFile = baseFiles.find((file) => file.path === '.env.example');
+      const files: readonly NewFile[] = standalone
+        ? [
+            ...baseFiles,
+            ...(envExampleFile ? [{ path: '.env', content: envExampleFile.content }] : []),
+            { path: '.github/workflows/ci.yml', content: standaloneCiWorkflow() },
+          ]
+        : baseFiles;
+
       const changes = await buildChanges(target, files, [], false);
+
+      if (options['dry-run'] === true) {
+        context.print(
+          `Dry run: create "${input.name}" in ${target} (${standalone ? 'standalone template' : 'workspace member'}) (no files written)`,
+        );
+        for (const line of describeChanges(changes)) context.print(line);
+        if (options['no-install'] !== true) {
+          context.print(`  install   bun install (${standalone ? 'standalone' : 'workspace'})`);
+        }
+        if (options['with-demo'] === true) {
+          context.print('  demo      make:crud Product --module products');
+        }
+        if (options['with-auth'] === true) {
+          context.print('  auth      make:auth (session + api-token)');
+        }
+        return {
+          data: {
+            dryRun: true,
+            application: input.name,
+            directory: target,
+            standalone,
+            files: changes.map((c) => c.path),
+            demo:
+              options['with-demo'] === true
+                ? { resource: 'Product', module: 'products', mount: '/api/v1/products' }
+                : null,
+            auth: options['with-auth'] === true ? { module: 'auth', guards: ['session', 'api-token'] } : null,
+          },
+          warnings: [],
+        };
+      }
+
       const applied = await applyChanges(target, changes);
       try {
         const warnings: string[] = [];
@@ -207,11 +354,11 @@ export const createCommands = [
           } catch (error) {
             context.print(`Created application "${input.name}" in ${target}; dependency installation failed.`);
             context.log(`Install error: ${error instanceof Error ? error.message : String(error)}`);
-            context.log('Run `bun install` inside the framework workspace, then retry or use --no-install.');
+            context.log('Run `bun install` inside the application or workspace, then retry or use --no-install.');
           }
         }
 
-        let demo: DemoResult | null = null;
+        let demo: SubGeneratorResult | null = null;
         if (options['with-demo'] === true) {
           if (dependenciesInstalled) {
             context.print('Generating sample products module (make:crud inside the new app)...');
@@ -223,6 +370,22 @@ export const createCommands = [
             warnings.push('--with-demo skipped: run `bun install` first, then `make:crud` inside the app.');
           }
         }
+
+        let auth: SubGeneratorResult | null = null;
+        if (options['with-auth'] === true) {
+          if (dependenciesInstalled) {
+            context.print('Installing authentication module (make:auth inside the new app)...');
+            auth = await generateAuthModule(target, context);
+            context.print(`Auth module: ${auth.detail}`);
+            if (!auth.ok) warnings.push('--with-auth could not finish; run make:auth inside the app to retry.');
+          } else {
+            auth = { ok: false, detail: 'skipped: dependencies are not installed' };
+            warnings.push('--with-auth skipped: run `bun install` first, then `make:auth` inside the app.');
+          }
+        }
+
+        const shouldInitGit = options.git === true || (standalone && options['no-git'] !== true);
+        const gitInitialized = shouldInitGit ? await initGitRepository(target, context) : false;
 
         for (const line of describeChanges(changes)) context.print(line);
         if (workspace) {
@@ -236,7 +399,8 @@ export const createCommands = [
         }
         const nextSteps = [
           `cd ${directory}`,
-          'cp .env.example .env',
+          ...(standalone ? [] : ['cp .env.example .env']),
+          ...(options['no-install'] === true ? ['bun install'] : []),
           'docker compose -f deployment/compose.yaml up -d --wait',
           'bun run cli -- db:migrate',
           ...(demo?.ok
@@ -250,8 +414,12 @@ export const createCommands = [
           data: {
             application: input.name,
             directory: target,
+            standalone,
+            gitInitialized,
+            envCreated: standalone,
             files: changes.map((c) => c.path),
             demo: demo?.ok ? { resource: 'Product', module: 'products', mount: '/api/v1/products' } : null,
+            auth: auth?.ok ? { module: 'auth', guards: ['session', 'api-token'] } : null,
           },
           warnings,
         };

@@ -30,9 +30,19 @@ bun install
 
 ### Creating a New Application
 
-Use the starter application template repository to bootstrap a full application with all framework packages pre-wired:
+Scaffold a fresh standalone application from the starter template anywhere on your machine using `bunx`:
 
 ```sh
+bunx @framework/cli create my-api --with-demo
+# or directly from GitHub:
+bunx --package github:mohamedhabibwork/framework-cli#standalone framework create my-api --with-demo
+```
+
+Or clone the starter application template repository directly:
+
+```sh
+bun create mohamedhabibwork/framework-app my-api
+# or with GitHub CLI:
 gh repo create my-api --template mohamedhabibwork/framework-app --clone
 cd my-api
 bun install

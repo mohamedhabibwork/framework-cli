@@ -962,11 +962,36 @@ COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/bin bin
 COPY --from=build /app/bootstrap bootstrap
 COPY --from=build /app/app app
-COPY --from=build /app/routes routes
 COPY --from=build /app/config config
 COPY --from=build /app/database database
 # Non-root runtime user.
 USER bun
 CMD ["bun", "run", "bin/server.ts"]
+`;
+}
+
+/** GitHub Actions CI workflow included in standalone template applications. */
+export function standaloneCiWorkflow(): string {
+  return `name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install
+      - run: bun run format:check
+      - run: bun run lint
+      - run: bun run typecheck
 `;
 }

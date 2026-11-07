@@ -813,3 +813,149 @@ describe('infrastructure command execution (in process)', () => {
     expect(result.envelope.error?.message).toMatch(/publicBaseUrl/);
   });
 });
+
+describe('standalone CLI binary & enhanced create command', () => {
+  const BIN_PATH = join(import.meta.dir, '../src/bin.ts');
+
+  async function runStandaloneBin(args: string[], cwd: string) {
+    const child = Bun.spawn(['bun', 'run', BIN_PATH, ...args], {
+      cwd,
+      env: { ...process.env },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    return { stdout, stderr, code };
+  }
+
+  test('standalone binary runs --version, list, and create --dry-run outside any project, and refuses app-only commands with exit 3', async () => {
+    const outsideDir = await mkdtemp(join(tmpdir(), 'fw-bin-outside-'));
+    try {
+      const version = await runStandaloneBin(['--json', 'list', '--version'], outsideDir);
+      expect(version.code).toBe(0);
+      expect(JSON.parse(version.stdout)).toMatchObject({
+        status: 'ok',
+        data: { cli: '0.2.0', framework: '0.2.0' },
+      });
+
+      const list = await runStandaloneBin(['--json', 'list'], outsideDir);
+      expect(list.code).toBe(0);
+      expect(JSON.parse(list.stdout).status).toBe('ok');
+
+      const dryCreate = await runStandaloneBin(
+        ['--json', 'create', 'fresh-api', '--with-demo', '--with-auth', '--dry-run'],
+        outsideDir,
+      );
+      expect(dryCreate.code).toBe(0);
+      const dryEnvelope = JSON.parse(dryCreate.stdout) as {
+        status: string;
+        data: {
+          dryRun: boolean;
+          application: string;
+          standalone: boolean;
+          files: string[];
+          demo: { module: string } | null;
+          auth: { module: string } | null;
+        };
+      };
+      expect(dryEnvelope.status).toBe('ok');
+      expect(dryEnvelope.data).toMatchObject({
+        dryRun: true,
+        application: 'fresh-api',
+        standalone: true,
+        demo: { module: 'products' },
+        auth: { module: 'auth' },
+      });
+      expect(dryEnvelope.data.files).toContain('package.json');
+      expect(dryEnvelope.data.files).toContain('.github/workflows/ci.yml');
+      expect(await Bun.file(join(outsideDir, 'fresh-api/package.json')).exists()).toBe(false);
+
+      const appOnly = await runStandaloneBin(['--json', 'route:list'], outsideDir);
+      expect(appOnly.code).toBe(EXIT.UNSUPPORTED);
+      expect(JSON.parse(appOnly.stdout)).toMatchObject({
+        status: 'error',
+        error: { code: 'UNSUPPORTED_CAPABILITY' },
+      });
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  test('create prompts for directory when omitted interactively and exits 2 under --no-interaction', async () => {
+    const outsideDir = await mkdtemp(join(tmpdir(), 'fw-create-prompt-'));
+    try {
+      const missingNonInteractive = await runStandaloneBin(['--json', 'create', '--no-interaction'], outsideDir);
+      expect(missingNonInteractive.code).toBe(EXIT.USAGE);
+
+      const targetDir = join(outsideDir, 'prompted-api');
+      const out: string[] = [];
+      const { createStandaloneProject } = await import('../src/project');
+      const code = await runCli({
+        argv: ['--json', 'create', '--dry-run'],
+        project: createStandaloneProject(outsideDir, '0.2.0'),
+        commands: frameworkCommands,
+        cliVersion: '0.2.0',
+        isTTY: false,
+        answers: { 'Application directory': targetDir },
+        stdout: (line) => out.push(line),
+        stderr: () => {},
+      });
+      expect(code).toBe(0);
+      const parsed = JSON.parse(out.join('\n')) as { data: { application: string; dryRun: boolean } };
+      expect(parsed.data).toMatchObject({ application: 'prompted-api', dryRun: true });
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  test('create scaffolds a standalone application outside the workspace with template parity (.env, CI workflow, git init, valid Dockerfile)', async () => {
+    const outsideDir = await mkdtemp(join(tmpdir(), 'fw-standalone-app-'));
+    try {
+      const target = join(outsideDir, 'my-standalone-api');
+      const res = await runStandaloneBin(['--json', 'create', target, '--no-install', '--git'], outsideDir);
+      expect(res.code).toBe(0);
+      const body = JSON.parse(res.stdout) as {
+        status: string;
+        data: {
+          application: string;
+          standalone: boolean;
+          gitInitialized: boolean;
+          envCreated: boolean;
+          files: string[];
+        };
+      };
+      expect(body.status).toBe('ok');
+      expect(body.data).toMatchObject({
+        application: 'my-standalone-api',
+        standalone: true,
+        gitInitialized: true,
+        envCreated: true,
+      });
+
+      const pkg = (await Bun.file(join(target, 'package.json')).json()) as {
+        name: string;
+        version: string;
+        dependencies: Record<string, string>;
+        devDependencies: Record<string, string>;
+      };
+      expect(pkg.name).toBe('my-standalone-api');
+      expect(pkg.version).toBe('0.2.0');
+      expect(pkg.dependencies['@framework/core']).toBe('github:mohamedhabibwork/framework-core#standalone');
+      expect(pkg.dependencies['@framework/cli']).toBe('github:mohamedhabibwork/framework-cli#standalone');
+      expect(pkg.devDependencies['@framework/testing']).toBe('github:mohamedhabibwork/framework-testing#standalone');
+
+      expect(await Bun.file(join(target, '.env')).exists()).toBe(true);
+      expect(await Bun.file(join(target, '.github/workflows/ci.yml')).exists()).toBe(true);
+      expect(await Bun.file(join(target, '.git/HEAD')).exists()).toBe(true);
+
+      const dockerfile = await Bun.file(join(target, 'Dockerfile')).text();
+      expect(dockerfile).not.toContain('/app/routes');
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+});

@@ -13,9 +13,16 @@
     "url": "git+https://github.com/mohamedhabibwork/framework.git",
     "directory": "packages/cli"
   },
+  "bin": {
+    "cli": "./src/bin.ts",
+    "framework": "./src/bin.ts",
+    "framework-cli": "./src/bin.ts",
+    "hono-framework": "./src/bin.ts"
+  },
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./bin": "./src/bin.ts"
   },
   "scripts": {
     "lint": "oxlint",

@@ -1,6 +1,7 @@
 import type { Seeder } from '@framework/database';
 import type { MiddlewareDescription, RouteInfo } from '@framework/http';
 import type { Operation } from '@framework/openapi';
+import { unsupported } from './errors';
 
 /** Project-relative locations used by generators and operational commands. */
 export interface ProjectPaths {
@@ -138,3 +139,51 @@ export interface ProjectAdapter {
 }
 
 export const defineProject = (project: ProjectAdapter): ProjectAdapter => project;
+
+function requireAppProject(): never {
+  throw unsupported(
+    'This command requires an application project',
+    'Run inside a generated application directory (containing bin/cli.ts), or create one first with `bunx @framework/cli create <directory>`.',
+  );
+}
+
+/**
+ * Fallback project adapter used when the CLI is invoked outside an existing
+ * application (e.g. `bunx @framework/cli create my-api`, `list`, `help`, `--version`).
+ */
+export function createStandaloneProject(root: string, frameworkVersion = '0.2.0'): ProjectAdapter {
+  return {
+    name: 'standalone',
+    root,
+    frameworkVersion,
+    apiPrefix: '/api/v1',
+    paths: {
+      modules: 'app/modules',
+      schemaDir: 'database/schema',
+      schemaIndex: 'database/schema/index.ts',
+      factories: 'database/factories',
+      migrations: 'database/migrations',
+      app: 'bootstrap/app.ts',
+      providers: 'bootstrap/app.ts',
+      middleware: 'bootstrap/middleware.ts',
+      config: 'config/index.ts',
+      testSupport: 'tests/support.ts',
+    },
+    tools: {
+      typecheck: ['bunx', 'tsc', '-p', 'tsconfig.json'],
+      test: ['bun', 'test'],
+      lint: ['bun', 'run', 'lint'],
+      format: ['bun', 'run', 'format'],
+      drizzleKit: ['bunx', 'drizzle-kit'],
+      dev: ['bun', 'run', '--hot', 'bin/server.ts'],
+      serve: ['bun', 'run', 'bin/server.ts'],
+      worker: ['bun', 'run', 'bin/worker.ts'],
+    },
+    loadConfig: async () => requireAppProject(),
+    databaseUrl: () => requireAppProject(),
+    routes: async () => requireAppProject(),
+    providers: () => requireAppProject(),
+    middleware: () => requireAppProject(),
+    openapi: () => requireAppProject(),
+  };
+}
